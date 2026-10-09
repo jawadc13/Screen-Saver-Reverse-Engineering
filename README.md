@@ -36,28 +36,29 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 
 Each monitor renders on its own thread at its own refresh rate. Mixed setups (for example 3440×1440 @ 175 Hz plus a portrait 2160×3840 @ 60 Hz, each on its own GPU) stay smooth on every screen. Animation speed doesn't depend on frame rate.
 
-The savers render with **OpenGL 1.1** instead of Direct3D 8, so they need no DirectX runtime. They run on Windows XP through Windows 11.
+The savers render with **Direct3D 11** (the original used Direct3D 8) and run on Windows 10 and 11. Like the original, each monitor gets its own Direct3D device, created on the graphics card that monitor is plugged into. Each monitor presents with a flip-model swap chain synced to its own refresh rate. Nothing is copied between GPUs and no monitor waits for another.
 
 ## Building
 
-On Linux with MinGW-w64 (`apt install g++-mingw-w64-i686`), or with MSYS2 on Windows:
+On Linux with MinGW-w64 (`apt install g++-mingw-w64-x86-64`), or with MSYS2 on Windows:
 
 ```sh
-make            # -> build/pipes.scr, build/starfield.scr, build/polyhedra.scr (32-bit)
-make ARCH=x64   # 64-bit build
+make            # -> build/pipes.scr, build/starfield.scr, build/polyhedra.scr (64-bit)
+make ARCH=x86   # 32-bit build
 ```
 
 ## Installing
 
-Prebuilt 32-bit binaries are in `bin/`.
+Prebuilt 64-bit binaries are in `bin/`.
 
-Copy a `.scr` to `C:\Windows\System32` (64-bit build) or `C:\Windows\SysWOW64` (32-bit build on 64-bit Windows). Then choose it in **Screen saver settings**. You can also right-click the `.scr` file and choose **Install**, or **Test** to run it right away.
+Copy a `.scr` to `C:\Windows\System32`. Then choose it in **Screen saver settings**. You can also right-click the `.scr` file and choose **Install**, or **Test** to run it right away.
 
 ## Layout
 
 ```
 common/           shared framework: WinMain, command line, windows, input rules,
-                  OpenGL setup, registry, Display Settings dialog, common resources
+                  per-monitor render threads, registry, Display Settings dialog, common resources
+                  render.cpp: Direct3D 11 renderer (one device per monitor, on its own GPU)
 savers/<name>/    each saver: scene + settings dialog (.cpp), resources (.rc, .ico)
 tools/            pe_inspect.py (analysis), make_icons.py (icon generator)
 docs/             ANALYSIS.md + screenshots

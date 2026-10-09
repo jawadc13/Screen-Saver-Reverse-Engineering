@@ -9,7 +9,7 @@
 //    each time the screen is cleared).
 //  * Single or Multiple pipes at once; Solid (colored) or Textured surface.
 //  * When the grid is full enough, the screen is cleared and it starts again.
-#include "../../common/mesh.h"
+#include "../../common/saver.h"
 #include "resource.h"
 #include <commctrl.h>
 #include <commdlg.h>
@@ -150,7 +150,8 @@ class PipesScene : public Scene {
     float yaw = 0, pitch = 0;
     int width = 1, height = 1;
     int cellsFilled = 0, startsFailed = 0;
-    GLuint texture = 0;
+    Texture* texture = nullptr;
+    GpuMesh gpu;                       // pipe geometry on the GPU, appended as it grows
     bool textured = false;
 
     unsigned char& Cell(int x, int y, int z) { return occupied[(z * ny + y) * nx + x]; }
@@ -208,6 +209,7 @@ class PipesScene : public Scene {
     // --- simulation -----------------------------------------------------------
     void NewRound() {
         mesh.Clear();
+        gpu.Reset();
         std::fill(occupied.begin(), occupied.end(), 0);
         pipes.clear();
         cellsFilled = 0;
@@ -215,8 +217,10 @@ class PipesScene : public Scene {
         fade = -1;
         if (g_jointType == JOINT_CYCLE) roundJoint = cycleIndex++ % 3;  // elbow, ball, mixed...
         else roundJoint = (int)g_jointType;
-        yaw = RandF(-35, 35);
-        pitch = RandF(-20, 20);
+        // Gentler angles on stretched grids so the pipes stay large.
+        float stretch = (float)(nx > ny ? nx : ny) / 14.0f;
+        yaw = RandF(-35, 35) / stretch;
+        pitch = RandF(-20, 20) / stretch;
         StartPipe();
     }
 
@@ -294,16 +298,18 @@ class PipesScene : public Scene {
     }
 
 public:
-    ~PipesScene() { if (texture) glDeleteTextures(1, &texture); }
+    ~PipesScene() { delete texture; }
 
-    bool Init(int w, int h, bool preview) override {
+    bool Init(Renderer& r, int w, int h, bool preview) override {
         slices = preview ? 8 : 8 + (int)g_tessel * 4;
         textured = g_textured != 0;
         if (textured) {
-            texture = LoadTextureFromFile(g_textureName);
+            std::vector<unsigned> px;
+            int tw = 0, th = 0;
+            if (LoadImageFile(g_textureName, px, tw, th)) texture = r.CreateTexture(px.data(), tw, th);
             if (!texture) {
                 // Default texture: brushed-metal stripes.
-                static unsigned px[64 * 64];
+                px.resize(64 * 64);
                 for (int y = 0; y < 64; y++)
                     for (int x = 0; x < 64; x++) {
                         int v = 150 + (int)(60 * sinf(x * 0.2f)) + ((x * 7 + y * 13) % 17);
@@ -311,7 +317,7 @@ public:
                         int b = v > 200 ? 255 : v + 40;
                         px[y * 64 + x] = 0xFF000000u | (v << 16) | (v << 8) | b;
                     }
-                texture = CreateTextureBGRA(px, 64, 64);
+                texture = r.CreateTexture(px.data(), 64, 64);
             }
         }
         // Stepping interval: 0.25 s (slow) .. 0.008 s (fast).
@@ -323,18 +329,22 @@ public:
 
     void Resize(int w, int h) override {
         width = w; height = h > 0 ? h : 1;
-        int newNx = (int)(14.0f * width / height + 0.5f);
-        if (newNx < 6) newNx = 6;
+        // Grid follows the screen's shape: wide for 3440x1440, tall for a
+        // portrait 2160x3840, so pipes fill any monitor.
+        float aspect = (float)width / height;
+        int newNx = 14, newNy = 14;
+        if (aspect >= 1) newNx = (int)(14.0f * aspect + 0.5f);
+        else             newNy = (int)(14.0f / aspect + 0.5f);
         if (newNx > 40) newNx = 40;
-        if (newNx != nx || ny != 14) {
-            nx = newNx; ny = 14; nz = 14;
+        if (newNy > 40) newNy = 40;
+        if (newNx != nx || newNy != ny) {
+            nx = newNx; ny = newNy; nz = 14;
             occupied.assign(nx * ny * nz, 0);
             if (!mesh.verts.empty() || !pipes.empty()) NewRound();
         }
-        glViewport(0, 0, width, height);
     }
 
-    void Frame(float dt) override {
+    void Frame(Renderer& r, float dt) override {
         if (fade >= 0) {
             fade += dt;
             if (fade > 1.0f) NewRound();
@@ -345,63 +355,36 @@ public:
             if (steps == 8) stepTimer = 0;
         }
 
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        gluPerspective(45.0, (double)width / height, 1.0, 200.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-
-        float lightDir[4] = { -0.4f, 0.6f, 1.0f, 0 };
-        float lightDir2[4] = { 0.6f, -0.3f, 0.5f, 0 };
-        float white[4] = { 1, 1, 1, 1 }, dim[4] = { 0.35f, 0.35f, 0.4f, 1 }, amb[4] = { 0.15f, 0.15f, 0.15f, 1 };
-        glLightfv(GL_LIGHT0, GL_POSITION, lightDir);
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
-        glLightfv(GL_LIGHT0, GL_SPECULAR, white);
-        glLightfv(GL_LIGHT1, GL_POSITION, lightDir2);
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, dim);
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
-
-        float dist = ny * 0.5f / tanf(22.5f * kPi / 180) + nz * 0.5f + 1;
-        glTranslatef(0, 0, -dist);
-        glRotatef(pitch, 1, 0, 0);
-        glRotatef(yaw, 0, 1, 0);
-
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_LIGHTING);
-        glEnable(GL_LIGHT0);
-        glEnable(GL_LIGHT1);
-        glEnable(GL_NORMALIZE);
-        glEnable(GL_COLOR_MATERIAL);
-        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-        float spec[4] = { 0.8f, 0.8f, 0.8f, 1 };
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50);
-        glShadeModel(GL_SMOOTH);
-        if (textured && texture) {
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        r.BeginFrame(true);
+        // Pull the camera back until all 8 corners of the (rotated) grid are
+        // on screen - works for ultrawide, portrait and any camera angle.
+        float aspect = (float)width / height;
+        float t = tanf(22.5f * kPi / 180);
+        Mat4 rot = Mat4::Rotate(pitch, 1, 0, 0) * Mat4::Rotate(yaw, 0, 1, 0);
+        float dist = 0;
+        for (int c = 0; c < 8; c++) {
+            float x = (c & 1 ? 0.5f : -0.5f) * nx, y = (c & 2 ? 0.5f : -0.5f) * ny, z = (c & 4 ? 0.5f : -0.5f) * nz;
+            float rx = rot.m[0][0] * x + rot.m[0][1] * y + rot.m[0][2] * z;
+            float ry = rot.m[1][0] * x + rot.m[1][1] * y + rot.m[1][2] * z;
+            float rz = rot.m[2][0] * x + rot.m[2][1] * y + rot.m[2][2] * z;
+            float need = rz + fmaxf(fabsf(rx) / (t * aspect), fabsf(ry) / t);
+            if (need > dist) dist = need;
         }
-        mesh.Draw(textured && texture);
-        glDisable(GL_TEXTURE_2D);
-        glDisable(GL_LIGHTING);
+        dist *= 1.03f;   // small margin
+        Mat4 view = Mat4::Translate(0, 0, -dist) * rot;
+        r.SetCamera(view, Mat4::Perspective(45.0f, aspect, 1.0f, dist + nx + ny + nz));
+        r.SetLight(0, Vec3(-0.4f, 0.6f, 1.0f), 1, 1, 1);
+        r.SetLight(1, Vec3(0.6f, -0.3f, 0.5f), 0.35f, 0.35f, 0.4f);
+        r.SetAmbient(0.15f, 0.15f, 0.15f);
 
-        if (fade >= 0) {
-            // Fade to black before the screen is cleared.
-            glDisable(GL_DEPTH_TEST);
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glMatrixMode(GL_PROJECTION); glLoadIdentity();
-            glMatrixMode(GL_MODELVIEW);  glLoadIdentity();
-            glColor4f(0, 0, 0, fade > 1 ? 1 : fade);
-            glBegin(GL_QUADS);
-            glVertex2f(-1, -1); glVertex2f(1, -1); glVertex2f(1, 1); glVertex2f(-1, 1);
-            glEnd();
-            glDisable(GL_BLEND);
-        }
+        r.Upload(gpu, mesh);   // only the newly grown pieces are sent
+        DrawParams p;
+        p.specular[0] = p.specular[1] = p.specular[2] = 0.8f;
+        p.shininess = 50;
+        p.texture = textured ? texture : nullptr;
+        r.Draw(gpu, p);
+
+        if (fade >= 0) r.FullscreenQuad(0, 0, 0, fade > 1 ? 1 : fade);   // fade out before clearing
     }
 };
 

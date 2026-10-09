@@ -1,5 +1,5 @@
 // saver.cpp - screensaver framework (WinMain, command line, windows, input
-// rules, OpenGL setup, settings helpers, shared Display Settings dialog).
+// rules, Direct3D setup, settings helpers, shared Display Settings dialog).
 //
 // Behaviour mirrors the D3DSaver framework used by the XP 3D savers; every
 // rule implemented here is documented in docs/ANALYSIS.md.
@@ -7,12 +7,10 @@
 #include <commctrl.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <math.h>
 
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
-#endif
-#ifndef GL_BGRA_EXT
-#define GL_BGRA_EXT 0x80E1
 #endif
 
 HINSTANCE g_hInst;
@@ -87,21 +85,8 @@ void RegWriteString(const wchar_t* value, const wchar_t* data) {
 }
 
 // ---------------------------------------------------------------------------
-// Textures
+// Images
 // ---------------------------------------------------------------------------
-GLuint CreateTextureBGRA(const unsigned* pixels, int w, int h) {
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    // gluBuild2DMipmaps rescales non-power-of-two images for GL 1.1 drivers.
-    gluBuild2DMipmaps(GL_TEXTURE_2D, GL_RGBA, w, h, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixels);
-    return tex;
-}
-
 // Minimal GDI+ flat API declarations (gdiplus.dll ships with XP and later).
 namespace gdip {
 struct StartupInput { UINT32 version; void* debugCb; BOOL noBgThread; BOOL noCodecs; };
@@ -119,12 +104,12 @@ int  WINAPI GdipBitmapUnlockBits(void*, gdip::BitmapData*);
 int  WINAPI GdipDisposeImage(void*);
 }
 
-GLuint LoadTextureFromFile(const wchar_t* path) {
-    if (!path || !*path) return 0;
+bool LoadImageFile(const wchar_t* path, std::vector<unsigned>& px, int& outW, int& outH) {
+    if (!path || !*path) return false;
     gdip::StartupInput in = { 1, nullptr, FALSE, FALSE };
     ULONG_PTR token;
-    if (GdiplusStartup(&token, &in, nullptr) != 0) return 0;
-    GLuint tex = 0;
+    if (GdiplusStartup(&token, &in, nullptr) != 0) return false;
+    bool ok = false;
     void* bmp = nullptr;
     if (GdipCreateBitmapFromFile(path, &bmp) == 0 && bmp) {
         UINT w = 0, h = 0;
@@ -134,16 +119,17 @@ GLuint LoadTextureFromFile(const wchar_t* path) {
         gdip::BitmapData bd = {};
         const INT PixelFormat32bppARGB = 0x26200A, ImageLockModeRead = 1;
         if (w && h && GdipBitmapLockBits(bmp, &r, ImageLockModeRead, PixelFormat32bppARGB, &bd) == 0) {
-            std::vector<unsigned> px((size_t)w * h);
+            px.resize((size_t)w * h);
             for (UINT y = 0; y < h; y++)
                 memcpy(&px[(size_t)y * w], (BYTE*)bd.scan0 + (INT_PTR)y * bd.stride, w * 4);
             GdipBitmapUnlockBits(bmp, &bd);
-            tex = CreateTextureBGRA(px.data(), (int)w, (int)h);
+            outW = (int)w; outH = (int)h;
+            ok = true;
         }
         GdipDisposeImage(bmp);
     }
     GdiplusShutdown(token);
-    return tex;
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +176,7 @@ static void DisplayDlgShow(HWND dlg, DisplayDlgState* s) {
     int i = s->sel;
     const MonitorInfo& m = s->mons[i];
     wchar_t info[256];
-    wsprintfW(info, L"Name: %s%s\r\nMode: %d by %d\r\nRendering: OpenGL",
+    wsprintfW(info, L"Name: %s%s\r\nMode: %d by %d\r\nRendering: Direct3D 11 (this monitor's GPU)",
               m.device, m.primary ? L" (primary)" : L"",
               m.rc.right - m.rc.left, m.rc.bottom - m.rc.top);
     SetDlgItemTextW(dlg, IDC_MONITOR_INFO, info);
@@ -268,15 +254,13 @@ enum SaverMode { SM_CONFIG, SM_FULL, SM_PREVIEW, SM_PASSWORD, SM_TEST };
 
 struct SaverWindow {
     HWND     hwnd = nullptr;
-    HDC      hdc = nullptr;
-    HGLRC    hglrc = nullptr;
+    HMONITOR monitor = nullptr;
     Scene*   scene = nullptr;   // null => black window / failed preview
     uint32_t rng = 0;
     int      width = 0, height = 0;   // size the scene was last told about
     volatile LONG newW = 0, newH = 0; // latest size from WM_SIZE (main thread)
     bool     wantScene = false;       // false => "Display nothing" monitor
     volatile LONG failed = 0;
-    int      refreshHz = 60;          // the monitor's refresh rate
     HANDLE   thread = nullptr;        // this window's render thread
 };
 
@@ -325,7 +309,7 @@ static void StopRenderThreads() {
     stopping = true;
     std::vector<HANDLE> threads;
     for (auto* w : g_windows) if (w->thread) threads.push_back(w->thread);
-    // Keep pumping messages while waiting: a GL driver may need this (window)
+    // Keep pumping messages while waiting: a graphics driver may need this (window)
     // thread to answer a message before SwapBuffers can return.
     bool sawQuit = false;
     DWORD deadline = GetTickCount() + 5000;
@@ -469,28 +453,6 @@ static LRESULT CALLBACK SaverWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-static bool SetupGL(SaverWindow* w) {
-    w->hdc = GetDC(w->hwnd);
-    PIXELFORMATDESCRIPTOR pfd = {};
-    pfd.nSize = sizeof(pfd);
-    pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfd.cColorBits = 32;
-    pfd.cDepthBits = 24;
-    pfd.iLayerType = PFD_MAIN_PLANE;
-    int pf = ChoosePixelFormat(w->hdc, &pfd);
-    if (!pf || !SetPixelFormat(w->hdc, pf, &pfd)) { ErrorBox(nullptr, IDS_ERR_NO_PIXEL_FORMAT); return false; }
-    w->hglrc = wglCreateContext(w->hdc);
-    if (!w->hglrc || !wglMakeCurrent(w->hdc, w->hglrc)) { ErrorBox(nullptr, IDS_ERR_CREATE_DEVICE); return false; }
-
-    // Sync to vertical retrace when available (D3DPRESENT_INTERVAL_ONE).
-    typedef BOOL (WINAPI *SWAPPROC)(int);
-    auto swapInterval = (SWAPPROC)wglGetProcAddress("wglSwapIntervalEXT");
-    if (swapInterval) swapInterval(1);
-    return true;
-}
-
 static double Now() {
     static LARGE_INTEGER freq = {};
     if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
@@ -508,9 +470,10 @@ static void WaitUntil(double until) {
     }
 }
 
-// One render thread per monitor. Each has its own OpenGL context, its own
-// clock and its own vsync, so a 175 Hz and a 60 Hz monitor (even on
-// different GPUs) never wait on each other.
+// One render thread per monitor. Each has its own Direct3D 11 device -
+// created on the GPU that drives that monitor - its own clock and its own
+// vsync, so a 175 Hz and a 60 Hz monitor on different GPUs never wait on
+// each other or copy frames between GPUs.
 static DWORD WINAPI RenderThread(LPVOID param) {
     auto* w = (SaverWindow*)param;
     g_rng = &w->rng;
@@ -521,43 +484,55 @@ static DWORD WINAPI RenderThread(LPVOID param) {
 
     RECT rc; GetClientRect(w->hwnd, &rc);
     w->width = rc.right; w->height = rc.bottom;
-    if (!SetupGL(w)) { InterlockedExchange(&w->failed, 1); InvalidateRect(w->hwnd, nullptr, FALSE); return 0; }
+    Renderer* r = new Renderer;
+    if (!r->Create(w->hwnd, w->monitor, w->width, w->height)) {
+        delete r;
+        InterlockedExchange(&w->failed, 1);
+        InvalidateRect(w->hwnd, nullptr, FALSE);
+        if (g_mode != SM_PREVIEW) ErrorBox(nullptr, IDS_ERR_CREATE_DEVICE);
+        return 0;
+    }
     w->scene = CreateScene();
-    if (!w->scene || !w->scene->Init(w->width, w->height, g_mode == SM_PREVIEW)) {
+    if (!w->scene || !w->scene->Init(*r, w->width, w->height, g_mode == SM_PREVIEW)) {
         delete w->scene; w->scene = nullptr;
         InterlockedExchange(&w->failed, 1);
         InvalidateRect(w->hwnd, nullptr, FALSE);
         if (g_mode != SM_PREVIEW) ErrorBox(nullptr, IDS_ERR_INIT);
     } else {
         w->scene->Resize(w->width, w->height);
-        const double period = g_mode == SM_PREVIEW ? 1.0 / 30 : 1.0 / w->refreshHz;
+        const double period = r->RefreshPeriod();
         double last = Now();
         while (!g_quitting) {
             int nw = w->newW, nh = w->newH;
             if (nw > 0 && nh > 0 && (nw != w->width || nh != w->height)) {
                 w->width = nw; w->height = nh;
+                r->Resize(nw, nh);
                 w->scene->Resize(nw, nh);
             }
+            // Wait until this monitor can take a new frame, *then* sample the
+            // clock, so each frame shows the moment it will actually appear.
+            r->WaitForFrame();
             double now = Now();
-            float dt = (float)(now - last);
+            double dt = now - last;
             last = now;
-            if (dt > 0.1f) dt = 0.1f;   // avoid big jumps after stalls
+            // Snap to whole refresh periods: sub-millisecond timer jitter
+            // would otherwise show up as uneven motion. Variable frame rates
+            // (G-Sync, or a frame that ran long) keep the measured dt.
+            double frames = floor(dt / period + 0.5);
+            if (frames >= 1 && fabs(dt - frames * period) < 0.15 * period) dt = frames * period;
+            if (dt > 0.1) dt = 0.1;   // avoid big jumps after stalls
             if (w->width > 0 && w->height > 0) {
-                w->scene->Frame(dt);
-                SwapBuffers(w->hdc);
-                glFinish();             // block until the frame is really shown -> even timing
+                w->scene->Frame(*r, (float)dt);
+                r->Present();
             }
-            // vsync normally paces us at the monitor's own rate. If a frame
-            // came back much faster than one refresh, vsync isn't in effect
-            // (forced off in the driver, or the preview), so pace manually.
+            // If vsync is forced off in the driver, frames come back much
+            // faster than one refresh: pace them manually.
             if (Now() - now < period * 0.5) WaitUntil(now + period);
         }
         delete w->scene;
         w->scene = nullptr;
     }
-    wglMakeCurrent(nullptr, nullptr);
-    wglDeleteContext(w->hglrc);
-    w->hglrc = nullptr;
+    delete r;
     return 0;
 }
 
@@ -565,13 +540,6 @@ static void StartRenderThread(SaverWindow* w) {
     w->wantScene = true;
     w->thread = CreateThread(nullptr, 0, RenderThread, w, 0, nullptr);
     if (!w->thread) InterlockedExchange(&w->failed, 1);
-}
-
-static int MonitorRefreshHz(const wchar_t* device) {
-    DEVMODEW dm = {}; dm.dmSize = sizeof(dm);
-    if (EnumDisplaySettingsW(device, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
-        return (int)dm.dmDisplayFrequency;
-    return 60;   // 0/1 mean "hardware default"
 }
 
 static void RegisterSaverClass() {
@@ -604,6 +572,7 @@ static int RunSaver() {
         w->hwnd = CreateWindowExW(0, L"D3DSaverWndClass", title, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                                   0, 0, rc.right, rc.bottom, g_parent, nullptr, g_hInst, w);
         if (!w->hwnd) return 1;
+        w->monitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
         StartRenderThread(w);
     } else {
         // Windows 9x: tell the system a saver runs so Ctrl+Alt+Del and
@@ -615,7 +584,7 @@ static int RunSaver() {
             auto* w = new SaverWindow;
             w->rng = same ? seed : seed + (uint32_t)i * 0x9E3779B9u;
             if (!w->rng) w->rng = 1;
-            w->refreshHz = MonitorRefreshHz(mons[i].device);
+            w->monitor = mons[i].hmon ? mons[i].hmon : MonitorFromWindow(nullptr, MONITOR_DEFAULTTOPRIMARY);
             const RECT& r = mons[i].rc;
             w->hwnd = CreateWindowExW(WS_EX_TOPMOST | (g_mode == SM_FULL ? WS_EX_TOOLWINDOW : 0),
                                       L"D3DSaverWndClass", title, WS_POPUP | WS_VISIBLE,

@@ -1,6 +1,6 @@
 // starfield.cpp - "3D Starfield": flying through a field of stars, built on
 // the same framework (and so the same screensaver rules) as 3D Pipes.
-#include "../../common/mesh.h"
+#include "../../common/saver.h"
 #include "resource.h"
 #include <commctrl.h>
 
@@ -74,13 +74,18 @@ struct Star { float x, y, z; float r, g, b; };
 
 class StarfieldScene : public Scene {
     std::vector<Star> stars;
+    std::vector<Vertex> verts;
     int width = 1, height = 1;
-    float speed = 20, roll = 0, rollRate = 0, t = 0;
+    float speed = 20, roll = 0, rollRate = 0;
     static constexpr float kNear = 1.0f, kFar = 100.0f, kSpread = 40.0f;
 
     void Respawn(Star& s, bool anywhere) {
-        s.x = RandF(-kSpread, kSpread);
-        s.y = RandF(-kSpread, kSpread);
+        // Cover the screen's shape: wider for ultrawide, taller for portrait.
+        // The longer side is used both ways so rolling never shows empty corners.
+        float aspect = (float)width / height;
+        float spread = kSpread * (aspect > 1 ? aspect : 1 / aspect);
+        s.x = RandF(-spread, spread);
+        s.y = RandF(-spread, spread);
         s.z = anywhere ? RandF(-kFar, -kNear) : -kFar;
         switch (g_colorMode) {
         case COLOR_WHITE: s.r = s.g = s.b = 1; break;
@@ -91,72 +96,83 @@ class StarfieldScene : public Scene {
         }
     }
 
+    void Quad(const float* xy, const float* alpha, const Star& s) {
+        static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+        for (int k : idx) {
+            Vertex v = { xy[k * 2], xy[k * 2 + 1], 0.5f, 0, 0, 1, 0, 0,
+                         (unsigned char)(s.r * 255), (unsigned char)(s.g * 255), (unsigned char)(s.b * 255),
+                         (unsigned char)(alpha[k] * 255) };
+            verts.push_back(v);
+        }
+    }
+
 public:
-    bool Init(int w, int h, bool preview) override {
-        int count = 300 + (int)g_density * 30;
-        if (preview) count /= 4;
+    bool Init(Renderer& r, int w, int h, bool preview) override {
+        width = w; height = h > 0 ? h : 1;
+        // Star count scales with screen area so a 4K portrait screen looks
+        // as dense as a 1080p one.
+        float area = (float)width * height / (1920.0f * 1080.0f);
+        if (area < 0.25f) area = 0.25f;
+        if (area > 4) area = 4;
+        int count = (int)((300 + g_density * 30) * area);
+        if (preview) count = 300;
         stars.resize(count);
         for (auto& s : stars) Respawn(s, true);
         speed = 5 + g_speed * 0.6f;
         rollRate = RandF(-8, 8);
-        Resize(w, h);
         return true;
     }
 
-    void Resize(int w, int h) override {
-        width = w; height = h > 0 ? h : 1;
-        glViewport(0, 0, width, height);
-    }
+    void Resize(int w, int h) override { width = w; height = h > 0 ? h : 1; }
 
-    void Frame(float dt) override {
-        t += dt;
+    void Frame(Renderer& r, float dt) override {
         roll += rollRate * dt;
         if (RandF(0, 1) < dt * 0.1f) rollRate = RandF(-8, 8);   // drift the roll now and then
 
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        gluPerspective(60.0, (double)width / height, 0.5, 200.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        glRotatef(roll, 0, 0, 1);
+        // Stars are projected on the CPU and drawn as screen-space quads, so
+        // streak thickness is in pixels and identical on every resolution.
+        const float f = 1.0f / tanf(30.0f * kPi / 180);          // 60 degree vertical FOV
+        const float aspect = (float)width / height;
+        const float px = height / 540.0f > 1 ? height / 540.0f : 1;   // line width in pixels
+        const float sx = 2.0f / width, sy = 2.0f / height;         // pixels -> clip space
+        const float cr = cosf(roll * kPi / 180), sr = sinf(roll * kPi / 180);
+        const float trail = g_warp ? speed * 0.06f : 0.0f;
 
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_LIGHTING);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);   // additive glow
-        glEnable(GL_LINE_SMOOTH);
-        glEnable(GL_POINT_SMOOTH);
-
-        float move = speed * dt;
-        float trail = g_warp ? speed * 0.06f : 0.0f;
-        float pointSize = height / 400.0f;
-        if (pointSize < 1) pointSize = 1;
-
-        glLineWidth(pointSize);
-        glBegin(GL_LINES);
+        verts.clear();
         for (auto& s : stars) {
-            s.z += move;
+            s.z += speed * dt;
             if (s.z > -kNear) Respawn(s, false);
-            float bright = 1.0f - (-s.z / kFar);     // fade in from the distance
-            bright *= bright;
-            glColor4f(s.r, s.g, s.b, 0);
-            glVertex3f(s.x, s.y, s.z - trail - 0.05f);
-            glColor4f(s.r, s.g, s.b, bright);
-            glVertex3f(s.x, s.y, s.z);
-        }
-        glEnd();
-
-        glPointSize(pointSize * 1.5f);
-        glBegin(GL_POINTS);
-        for (auto& s : stars) {
+            float x = s.x * cr - s.y * sr, y = s.x * sr + s.y * cr;
             float bright = 1.0f - (-s.z / kFar);
-            glColor4f(s.r, s.g, s.b, bright * bright);
-            glVertex3f(s.x, s.y, s.z);
+            bright = bright * (2 - bright);         // ease-out: visible from further away
+            // Head and tail positions in pixels.
+            float hz = -s.z, tz = -(s.z - trail - 0.05f);
+            float hx = f / aspect * x / hz / sx, hy = f * y / hz / sy;
+            float tx = f / aspect * x / tz / sx, ty = f * y / tz / sy;
+            if (fabsf(hx) > width || fabsf(hy) > height) continue;
+            float dx = hx - tx, dy = hy - ty, len = sqrtf(dx * dx + dy * dy);
+            float w = px * (0.6f + 1.4f * bright);   // half-width in pixels
+            if (len > 0.5f) {
+                float nx = -dy / len * w, ny = dx / len * w;
+                float q[8] = { (tx + nx) * sx, (ty + ny) * sy, (hx + nx) * sx, (hy + ny) * sy,
+                               (hx - nx) * sx, (hy - ny) * sy, (tx - nx) * sx, (ty - ny) * sy };
+                float a[4] = { 0, bright, bright, 0 };
+                Quad(q, a, s);
+            }
+            float d = w * 1.5f;   // bright dot at the head
+            float q[8] = { (hx - d) * sx, (hy - d) * sy, (hx + d) * sx, (hy - d) * sy,
+                           (hx + d) * sx, (hy + d) * sy, (hx - d) * sx, (hy + d) * sy };
+            float a[4] = { bright, bright, bright, bright };
+            Quad(q, a, s);
         }
-        glEnd();
-        glDisable(GL_BLEND);
+
+        r.BeginFrame(true);
+        r.SetCamera(Mat4::Identity(), Mat4::Identity());
+        DrawParams p;
+        p.lit = false;
+        p.depth = false;
+        p.blend = BLEND_ADD;   // overlapping stars glow
+        r.Draw(verts.data(), verts.size(), p);
     }
 };
 

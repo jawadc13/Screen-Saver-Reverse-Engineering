@@ -96,7 +96,7 @@ Switches may begin with `/` or `-` and are case-insensitive. The HWND may follow
 
 ### Rendering
 15. Sync to the vertical refresh, and time frames with `QueryPerformanceCounter`.
-    The remake goes further for mixed setups (for example a 175 Hz and a 60 Hz monitor on different GPUs). **Each monitor gets its own render thread and OpenGL context.** Each thread uses its own clock and that monitor's vsync, so a slow monitor never holds back a fast one. If vsync is off, the thread paces itself to the monitor's refresh rate (`EnumDisplaySettings`). All animation is driven by elapsed time, so speed is the same at any refresh rate or resolution.
+    The remake goes further for mixed setups (for example a 175 Hz and a 60 Hz monitor on different GPUs). **Each monitor gets its own render thread and Direct3D 11 device, on that monitor's GPU.** Each thread uses its own clock and that monitor's vsync, so a slow monitor never holds back a fast one. If vsync is off, the thread paces itself to the monitor's refresh rate (`QueryDisplayConfig`). All animation is driven by elapsed time, so speed is the same at any refresh rate or resolution.
 16. Show errors from the 2100-range string table, with string 1 as the caption.
 
 ## 6. The Pipes animation
@@ -116,7 +116,7 @@ A pipe arrives at cell centre **P** moving along **din** and leaves along **dout
 
 ## 7. Differences in the remake
 
-* **OpenGL 1.1** replaces Direct3D 8. It works on every Windows version from XP up and needs no DirectX runtime.
+* **Direct3D 11** replaces Direct3D 8, so it needs Windows 10 or 11. An earlier version of the remake used OpenGL and was choppy on PCs with a different GPU per monitor. On GeForce cards an OpenGL context renders on one GPU only, and its vsync follows the primary monitor. Frames for the other monitor were copied between GPUs and paced to the wrong refresh rate. Direct3D 11 brings back the original's design: one device per monitor, created on that monitor's own adapter (`IDXGIOutput::GetDesc().Monitor`). Each monitor uses a flip-model swap chain with a frame-latency waitable object and `Present(1)`. Each render thread snaps its frame time to that monitor's exact refresh period (from `QueryDisplayConfig`).
 * Textures load through **GDI+** (BMP/JPG/PNG/GIF). TGA is not supported. D3DX is not used.
 * The Display Settings dialog has no "Disable hardware 3D rendering" or display-mode options. It keeps the per-monitor "Display nothing" choice and "same on all monitors" (`AllScreensSame`).
 * There is no `control.ini` migration.

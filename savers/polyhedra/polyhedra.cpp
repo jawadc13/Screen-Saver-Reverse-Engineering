@@ -1,6 +1,6 @@
 // polyhedra.cpp - "3D Polyhedra": shiny Platonic solids tumbling and
 // bouncing inside an invisible box. Same framework/rules as 3D Pipes.
-#include "../../common/mesh.h"
+#include "../../common/saver.h"
 #include "resource.h"
 #include <commctrl.h>
 
@@ -134,15 +134,19 @@ struct Body {
 };
 
 class PolyhedraScene : public Scene {
-    Mesh solids[4];
+    GpuMesh solids[4];
     std::vector<Body> bodies;
     int width = 1, height = 1;
     float boxX = 10, boxY = 7, boxZ = 6, speedScale = 1;
-    bool firstFrame = true;
 
 public:
-    bool Init(int w, int h, bool preview) override {
-        for (int i = 0; i < 4; i++) BuildSolid(solids[i], i);
+    bool Init(Renderer& r, int w, int h, bool preview) override {
+        for (int i = 0; i < 4; i++) {
+            Mesh m;
+            BuildSolid(m, i);
+            r.Upload(solids[i], m);
+        }
+        r.SetPersistent(g_trails != 0);
         speedScale = 0.3f + g_speed / 40.0f;
         Resize(w, h);
         bodies.resize(g_count);
@@ -164,13 +168,13 @@ public:
 
     void Resize(int w, int h) override {
         width = w; height = h > 0 ? h : 1;
-        boxY = 7;
-        boxX = boxY * width / height;
-        glViewport(0, 0, width, height);
-        firstFrame = true;
+        // The box takes the screen's shape (ultrawide or portrait).
+        float aspect = (float)width / height;
+        if (aspect >= 1) { boxY = 7; boxX = 7 * aspect; }
+        else             { boxX = 7; boxY = 7 / aspect; }
     }
 
-    void Frame(float dt) override {
+    void Frame(Renderer& r, float dt) override {
         float sdt = dt * speedScale;
         for (auto& b : bodies) {
             b.pos = b.pos + b.vel * sdt;
@@ -184,74 +188,27 @@ public:
             }
         }
 
-        if (g_trails && !firstFrame) {
-            // Darken the previous frame instead of clearing it -> trails.
-            // (The back buffer keeps its content on most drivers; if it
-            // doesn't, this degrades to a plain clear.)
-            glDisable(GL_DEPTH_TEST);
-            glDisable(GL_LIGHTING);
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glMatrixMode(GL_PROJECTION); glLoadIdentity();
-            glMatrixMode(GL_MODELVIEW);  glLoadIdentity();
-            // Same trail length at any refresh rate (0.25 per 1/60 s).
-            glColor4f(0, 0, 0, 1.0f - powf(0.75f, dt * 60.0f));
-            glBegin(GL_QUADS);
-            glVertex2f(-1, -1); glVertex2f(1, -1); glVertex2f(1, 1); glVertex2f(-1, 1);
-            glEnd();
-            glDisable(GL_BLEND);
-            glClear(GL_DEPTH_BUFFER_BIT);
-        } else {
-            glClearColor(0, 0, 0, 1);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        }
-        firstFrame = false;
+        // With trails the previous frame is kept and darkened a little each
+        // frame instead of cleared; same trail length at any refresh rate.
+        r.BeginFrame(!g_trails);
+        if (g_trails) r.FullscreenQuad(0, 0, 0, 1.0f - powf(0.75f, dt * 60.0f));
 
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        gluPerspective(45.0, (double)width / height, 1.0, 100.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
+        float aspect = (float)width / height;
         float dist = boxY / tanf(22.5f * kPi / 180) + boxZ;
-        glTranslatef(0, 0, -dist);
-
-        float l0[4] = { -0.5f, 0.8f, 1.0f, 0 }, l1[4] = { 0.7f, -0.4f, 0.6f, 0 };
-        float white[4] = { 1, 1, 1, 1 }, blue[4] = { 0.25f, 0.3f, 0.5f, 1 }, amb[4] = { 0.12f, 0.12f, 0.12f, 1 };
-        glLightfv(GL_LIGHT0, GL_POSITION, l0);
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, white);
-        glLightfv(GL_LIGHT0, GL_SPECULAR, white);
-        glLightfv(GL_LIGHT1, GL_POSITION, l1);
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, blue);
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb);
-        glEnable(GL_LIGHTING);
-        glEnable(GL_LIGHT0);
-        glEnable(GL_LIGHT1);
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_NORMALIZE);
-        glShadeModel(GL_FLAT);
-        float spec[4] = { 0.9f, 0.9f, 0.9f, 1 };
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, spec);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 70);
-        glDisable(GL_COLOR_MATERIAL);   // per-body material below; vertex colors are white
+        r.SetCamera(Mat4::Translate(0, 0, -dist), Mat4::Perspective(45.0f, aspect, 1.0f, dist + boxZ + 10));
+        r.SetLight(0, Vec3(-0.5f, 0.8f, 1.0f), 1, 1, 1);
+        r.SetLight(1, Vec3(0.7f, -0.4f, 0.6f), 0.25f, 0.3f, 0.5f);
+        r.SetAmbient(0.12f, 0.12f, 0.12f);
 
         for (auto& b : bodies) {
-            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, b.color);
-            glPushMatrix();
-            glTranslatef(b.pos.x, b.pos.y, b.pos.z);
-            glRotatef(b.angle, b.axis.x, b.axis.y, b.axis.z);
-            glScalef(b.size, b.size, b.size);
-            // Draw with the color array off so the material color applies.
-            const Mesh& m = solids[b.shape];
-            glEnableClientState(GL_VERTEX_ARRAY);
-            glEnableClientState(GL_NORMAL_ARRAY);
-            glVertexPointer(3, GL_FLOAT, sizeof(Vertex), &m.verts[0].px);
-            glNormalPointer(GL_FLOAT, sizeof(Vertex), &m.verts[0].nx);
-            glDrawArrays(GL_TRIANGLES, 0, (GLsizei)m.verts.size());
-            glDisableClientState(GL_NORMAL_ARRAY);
-            glDisableClientState(GL_VERTEX_ARRAY);
-            glPopMatrix();
+            DrawParams p;
+            p.world = Mat4::Translate(b.pos.x, b.pos.y, b.pos.z) * Mat4::Rotate(b.angle, b.axis.x, b.axis.y, b.axis.z) * Mat4::Scale(b.size);
+            p.vertexColor = false;
+            memcpy(p.color, b.color, sizeof(p.color));
+            p.specular[0] = p.specular[1] = p.specular[2] = 0.9f;
+            p.shininess = 70;
+            r.Draw(solids[b.shape], p);
         }
-        glDisable(GL_LIGHTING);
     }
 };
 

@@ -8,10 +8,10 @@
 STRINGTABLE
 BEGIN
     IDS_ERR_GENERIC         "There was an unspecified problem with this screen saver."
-    IDS_ERR_NOGL            "OpenGL could not be initialized.  Please install the latest video driver."
+    IDS_ERR_NOGL            "Direct3D 11 could not be initialized.  Please install the latest video driver."
     IDS_ERR_INIT            "Could not initialize the screen saver."
-    IDS_ERR_CREATE_DEVICE   "Could not create the OpenGL rendering context."
-    IDS_ERR_NO_PIXEL_FORMAT "Could not find any compatible OpenGL pixel formats."
+    IDS_ERR_CREATE_DEVICE   "Could not create the Direct3D device."
+    IDS_ERR_NO_PIXEL_FORMAT "Could not find any compatible Direct3D devices."
     IDS_ERR_OUT_OF_MEMORY   "Not enough memory."
     IDS_NO_PREVIEW          "No preview available"
 END
@@ -28,7 +28,7 @@ BEGIN
     AUTORADIOBUTTON "Display &screen saver on this monitor", IDC_SHOW_SAVER, 90, 65, 158, 10, WS_GROUP | WS_TABSTOP
     AUTORADIOBUTTON "Display &nothing on this monitor", IDC_LEAVE_BLACK, 90, 78, 158, 10
     AUTOCHECKBOX    "Show the &same animation on every monitor", IDC_SAME_ON_ALL, 84, 100, 169, 10, WS_GROUP | WS_TABSTOP
-    LTEXT           "Note: each monitor gets its own window and OpenGL context, so every screen renders at its native resolution.", -1, 84, 116, 169, 28
+    LTEXT           "Note: each monitor is drawn by its own graphics card at its own resolution and refresh rate.", -1, 84, 116, 169, 28
     DEFPUSHBUTTON   "OK", IDOK, 146, 165, 50, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 203, 165, 50, 14
 END
