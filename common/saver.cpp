@@ -22,7 +22,8 @@ HINSTANCE g_hInst;
 // with "same image on all monitors", every screen evolves identically.
 // ---------------------------------------------------------------------------
 static uint32_t  g_defaultRng = 0x12345678u;
-static uint32_t* g_rng = &g_defaultRng;
+// Thread-local because every monitor renders on its own thread.
+static thread_local uint32_t* g_rng = &g_defaultRng;
 
 static uint32_t NextRand() {
     // xorshift32
@@ -271,14 +272,18 @@ struct SaverWindow {
     HGLRC    hglrc = nullptr;
     Scene*   scene = nullptr;   // null => black window / failed preview
     uint32_t rng = 0;
-    int      width = 0, height = 0;
-    bool     failed = false;
+    int      width = 0, height = 0;   // size the scene was last told about
+    volatile LONG newW = 0, newH = 0; // latest size from WM_SIZE (main thread)
+    bool     wantScene = false;       // false => "Display nothing" monitor
+    volatile LONG failed = 0;
+    int      refreshHz = 60;          // the monitor's refresh rate
+    HANDLE   thread = nullptr;        // this window's render thread
 };
 
 static SaverMode                 g_mode;
 static HWND                      g_parent;
 static std::vector<SaverWindow*> g_windows;
-static bool                      g_quitting;
+static volatile LONG             g_quitting;
 static bool                      g_checkingPassword;
 static int                       g_mouseMoves;
 static POINT                     g_lastMouse = { -1, -1 };
@@ -311,12 +316,47 @@ static bool Win9xPasswordOk(HWND hwnd) {
     return ok != FALSE;
 }
 
+// Tells every render thread to finish and waits for them, so no thread is
+// still drawing into a window that is about to be destroyed.
+static void StopRenderThreads() {
+    static bool stopping = false;
+    InterlockedExchange(&g_quitting, 1);
+    if (stopping) return;          // re-entered from a message pumped below
+    stopping = true;
+    std::vector<HANDLE> threads;
+    for (auto* w : g_windows) if (w->thread) threads.push_back(w->thread);
+    // Keep pumping messages while waiting: a GL driver may need this (window)
+    // thread to answer a message before SwapBuffers can return.
+    bool sawQuit = false;
+    DWORD deadline = GetTickCount() + 5000;
+    while (!threads.empty() && (int)(deadline - GetTickCount()) > 0) {
+        DWORD r = MsgWaitForMultipleObjects((DWORD)threads.size(), threads.data(), FALSE,
+                                            deadline - GetTickCount(), QS_ALLINPUT);
+        if (r < WAIT_OBJECT_0 + threads.size()) {
+            threads.erase(threads.begin() + (r - WAIT_OBJECT_0));
+        } else if (r == WAIT_OBJECT_0 + threads.size()) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                if (msg.message == WM_QUIT) { sawQuit = true; continue; }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        } else {
+            break;   // timeout or error
+        }
+    }
+    for (auto* w : g_windows)
+        if (w->thread) { CloseHandle(w->thread); w->thread = nullptr; }
+    if (sawQuit) PostQuitMessage(0);
+    stopping = false;
+}
+
 // Any user input ends the saver (InterruptSaver in D3DSaver).
 static void InterruptSaver(HWND hwnd) {
     if (g_quitting || g_checkingPassword) return;
     if (g_mode != SM_FULL && g_mode != SM_TEST) return;
     if (!Win9xPasswordOk(hwnd)) return;
-    g_quitting = true;
+    StopRenderThreads();
     for (auto* w : g_windows) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
 }
 
@@ -350,7 +390,7 @@ static LRESULT CALLBACK SaverWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         return 1;
 
     case WM_PAINT:
-        if (!w || !w->scene) {
+        if (!w || !w->wantScene || w->failed) {
             if (g_mode == SM_PREVIEW) { PaintNoPreview(hwnd); return 0; }
             PAINTSTRUCT ps; HDC dc = BeginPaint(hwnd, &ps);
             FillRect(dc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
@@ -361,11 +401,8 @@ static LRESULT CALLBACK SaverWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
         return 0;
 
     case WM_SIZE:
-        if (w) { w->width = LOWORD(lp); w->height = HIWORD(lp); }
-        if (w && w->scene && w->width > 0 && w->height > 0) {
-            wglMakeCurrent(w->hdc, w->hglrc);
-            w->scene->Resize(w->width, w->height);
-        }
+        // The render thread picks the new size up before its next frame.
+        if (w) { InterlockedExchange(&w->newW, LOWORD(lp)); InterlockedExchange(&w->newH, HIWORD(lp)); }
         return 0;
 
     // --- Input rules: anything ends a full-screen saver ------------------
@@ -425,7 +462,7 @@ static LRESULT CALLBACK SaverWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) 
     case WM_DESTROY:
         // Preview: the Display Properties dialog destroys our parent (and so
         // us) when the user picks another saver or closes the dialog.
-        g_quitting = true;
+        StopRenderThreads();
         PostQuitMessage(0);
         return 0;
     }
@@ -454,19 +491,87 @@ static bool SetupGL(SaverWindow* w) {
     return true;
 }
 
-static void InitScene(SaverWindow* w) {
+static double Now() {
+    static LARGE_INTEGER freq = {};
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER t; QueryPerformanceCounter(&t);
+    return (double)t.QuadPart / (double)freq.QuadPart;
+}
+
+// Waits until `until` (seconds, Now() clock): sleeps most of it, then spins.
+static void WaitUntil(double until) {
+    for (;;) {
+        double left = until - Now();
+        if (left <= 0) return;
+        if (left > 0.002) Sleep((DWORD)((left - 0.0015) * 1000));
+        else YieldProcessor();
+    }
+}
+
+// One render thread per monitor. Each has its own OpenGL context, its own
+// clock and its own vsync, so a 175 Hz and a 60 Hz monitor (even on
+// different GPUs) never wait on each other.
+static DWORD WINAPI RenderThread(LPVOID param) {
+    auto* w = (SaverWindow*)param;
+    g_rng = &w->rng;
+    if (g_mode == SM_PREVIEW)
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);  // keep Control Panel responsive
+    else
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);  // steady frame pacing
+
     RECT rc; GetClientRect(w->hwnd, &rc);
     w->width = rc.right; w->height = rc.bottom;
-    if (!SetupGL(w)) { w->failed = true; return; }
-    g_rng = &w->rng;
+    if (!SetupGL(w)) { InterlockedExchange(&w->failed, 1); InvalidateRect(w->hwnd, nullptr, FALSE); return 0; }
     w->scene = CreateScene();
     if (!w->scene || !w->scene->Init(w->width, w->height, g_mode == SM_PREVIEW)) {
         delete w->scene; w->scene = nullptr;
-        w->failed = true;
+        InterlockedExchange(&w->failed, 1);
+        InvalidateRect(w->hwnd, nullptr, FALSE);
         if (g_mode != SM_PREVIEW) ErrorBox(nullptr, IDS_ERR_INIT);
-        return;
+    } else {
+        w->scene->Resize(w->width, w->height);
+        const double period = g_mode == SM_PREVIEW ? 1.0 / 30 : 1.0 / w->refreshHz;
+        double last = Now();
+        while (!g_quitting) {
+            int nw = w->newW, nh = w->newH;
+            if (nw > 0 && nh > 0 && (nw != w->width || nh != w->height)) {
+                w->width = nw; w->height = nh;
+                w->scene->Resize(nw, nh);
+            }
+            double now = Now();
+            float dt = (float)(now - last);
+            last = now;
+            if (dt > 0.1f) dt = 0.1f;   // avoid big jumps after stalls
+            if (w->width > 0 && w->height > 0) {
+                w->scene->Frame(dt);
+                SwapBuffers(w->hdc);
+                glFinish();             // block until the frame is really shown -> even timing
+            }
+            // vsync normally paces us at the monitor's own rate. If a frame
+            // came back much faster than one refresh, vsync isn't in effect
+            // (forced off in the driver, or the preview), so pace manually.
+            if (Now() - now < period * 0.5) WaitUntil(now + period);
+        }
+        delete w->scene;
+        w->scene = nullptr;
     }
-    w->scene->Resize(w->width, w->height);
+    wglMakeCurrent(nullptr, nullptr);
+    wglDeleteContext(w->hglrc);
+    w->hglrc = nullptr;
+    return 0;
+}
+
+static void StartRenderThread(SaverWindow* w) {
+    w->wantScene = true;
+    w->thread = CreateThread(nullptr, 0, RenderThread, w, 0, nullptr);
+    if (!w->thread) InterlockedExchange(&w->failed, 1);
+}
+
+static int MonitorRefreshHz(const wchar_t* device) {
+    DEVMODEW dm = {}; dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(device, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return (int)dm.dmDisplayFrequency;
+    return 60;   // 0/1 mean "hardware default"
 }
 
 static void RegisterSaverClass() {
@@ -499,9 +604,7 @@ static int RunSaver() {
         w->hwnd = CreateWindowExW(0, L"D3DSaverWndClass", title, WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                                   0, 0, rc.right, rc.bottom, g_parent, nullptr, g_hInst, w);
         if (!w->hwnd) return 1;
-        // The preview shouldn't steal CPU from the Display Properties dialog.
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-        InitScene(w);
+        StartRenderThread(w);
     } else {
         // Windows 9x: tell the system a saver runs so Ctrl+Alt+Del and
         // Alt+Tab are disabled while the password dialog is in effect.
@@ -512,6 +615,7 @@ static int RunSaver() {
             auto* w = new SaverWindow;
             w->rng = same ? seed : seed + (uint32_t)i * 0x9E3779B9u;
             if (!w->rng) w->rng = 1;
+            w->refreshHz = MonitorRefreshHz(mons[i].device);
             const RECT& r = mons[i].rc;
             w->hwnd = CreateWindowExW(WS_EX_TOPMOST | (g_mode == SM_FULL ? WS_EX_TOOLWINDOW : 0),
                                       L"D3DSaverWndClass", title, WS_POPUP | WS_VISIBLE,
@@ -520,7 +624,7 @@ static int RunSaver() {
             if (!w->hwnd) { delete w; continue; }
             g_windows.push_back(w);
             wchar_t key[32]; ScreenKey(key, (int)i);
-            if (!RegReadDword(L"Leave Black", 0, key)) InitScene(w);  // else stays black
+            if (!RegReadDword(L"Leave Black", 0, key)) StartRenderThread(w);  // else stays black
         }
         if (g_windows.empty()) return 1;
         SetForegroundWindow(g_windows[0]->hwnd);
@@ -529,46 +633,15 @@ static int RunSaver() {
         ShowCursor(FALSE);
     }
 
-    LARGE_INTEGER freq, last, now;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&last);
-
+    // The main thread only handles messages; rendering happens on the
+    // per-monitor threads.
     MSG msg;
-    for (;;) {
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) goto done;
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        if (g_quitting) { Sleep(1); continue; }
-
-        QueryPerformanceCounter(&now);
-        float dt = (float)(now.QuadPart - last.QuadPart) / (float)freq.QuadPart;
-        last = now;
-        if (dt > 0.1f) dt = 0.1f;   // avoid big jumps after stalls
-
-        bool drew = false;
-        for (auto* w : g_windows) {
-            if (!w->scene || w->width <= 0 || w->height <= 0) continue;
-            wglMakeCurrent(w->hdc, w->hglrc);
-            g_rng = &w->rng;
-            w->scene->Frame(dt);
-            SwapBuffers(w->hdc);
-            drew = true;
-        }
-        if (!drew) WaitMessage();
-        else if (g_mode == SM_PREVIEW) Sleep(15);   // ~ 30-60 fps is plenty for the preview
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-done:
-    for (auto* w : g_windows) {
-        if (w->hglrc) {
-            wglMakeCurrent(w->hdc, w->hglrc);
-            delete w->scene;
-            wglMakeCurrent(nullptr, nullptr);
-            wglDeleteContext(w->hglrc);
-        }
-        delete w;
-    }
+    StopRenderThreads();
+    for (auto* w : g_windows) delete w;
     g_windows.clear();
     if (g_mode != SM_PREVIEW) {
         ShowCursor(TRUE);

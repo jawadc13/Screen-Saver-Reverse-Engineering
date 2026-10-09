@@ -34,6 +34,8 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 * String #1 holds the name shown in Windows. Icon #101, a version resource, and a Common Controls 6 manifest are included.
 * Settings are saved per user in the registry under `HKCU\Software\ScreenSaverRE\<Name>`. The value names are the originals' (`Speed`, `Joint Type`, `MultiPipes`, `Textured`, `Texture Name`, `Screen N\Leave Black`, `AllScreensSame`, ...).
 
+Each monitor renders on its own thread at its own refresh rate. Mixed setups (for example 3440×1440 @ 175 Hz plus a portrait 2160×3840 @ 60 Hz, each on its own GPU) stay smooth on every screen. Animation speed doesn't depend on frame rate.
+
 The savers render with **OpenGL 1.1** instead of Direct3D 8, so they need no DirectX runtime. They run on Windows XP through Windows 11.
 
 ## Building

@@ -96,6 +96,7 @@ Switches may begin with `/` or `-` and are case-insensitive. The HWND may follow
 
 ### Rendering
 15. Sync to the vertical refresh, and time frames with `QueryPerformanceCounter`.
+    The remake goes further for mixed setups (for example a 175 Hz and a 60 Hz monitor on different GPUs). **Each monitor gets its own render thread and OpenGL context.** Each thread uses its own clock and that monitor's vsync, so a slow monitor never holds back a fast one. If vsync is off, the thread paces itself to the monitor's refresh rate (`EnumDisplaySettings`). All animation is driven by elapsed time, so speed is the same at any refresh rate or resolution.
 16. Show errors from the 2100-range string table, with string 1 as the caption.
 
 ## 6. The Pipes animation

@@ -194,7 +194,8 @@ public:
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glMatrixMode(GL_PROJECTION); glLoadIdentity();
             glMatrixMode(GL_MODELVIEW);  glLoadIdentity();
-            glColor4f(0, 0, 0, 0.25f);
+            // Same trail length at any refresh rate (0.25 per 1/60 s).
+            glColor4f(0, 0, 0, 1.0f - powf(0.75f, dt * 60.0f));
             glBegin(GL_QUADS);
             glVertex2f(-1, -1); glVertex2f(1, -1); glVertex2f(1, 1); glVertex2f(-1, 1);
             glEnd();
