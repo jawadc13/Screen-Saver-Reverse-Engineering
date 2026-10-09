@@ -1,0 +1,34 @@
+// common.rc - resources every screensaver shares. #included from each
+// saver's own .rc file.
+#include <windows.h>
+#include "common_res.h"
+
+1 24 "saver.manifest"   // RT_MANIFEST: common controls v6, like the original
+
+STRINGTABLE
+BEGIN
+    IDS_ERR_GENERIC         "There was an unspecified problem with this screen saver."
+    IDS_ERR_NOGL            "OpenGL could not be initialized.  Please install the latest video driver."
+    IDS_ERR_INIT            "Could not initialize the screen saver."
+    IDS_ERR_CREATE_DEVICE   "Could not create the OpenGL rendering context."
+    IDS_ERR_NO_PIXEL_FORMAT "Could not find any compatible OpenGL pixel formats."
+    IDS_ERR_OUT_OF_MEMORY   "Not enough memory."
+    IDS_NO_PREVIEW          "No preview available"
+END
+
+IDD_DISPLAY_SETTINGS DIALOGEX 0, 0, 260, 186
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Display Settings"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LISTBOX         IDC_MONITOR_LIST, 7, 7, 70, 110, LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | WS_BORDER
+    GROUPBOX        "Video adapter", -1, 84, 4, 169, 46
+    LTEXT           "", IDC_MONITOR_INFO, 90, 15, 158, 32
+    GROUPBOX        "Monitor usage", -1, 84, 54, 169, 40
+    AUTORADIOBUTTON "Display &screen saver on this monitor", IDC_SHOW_SAVER, 90, 65, 158, 10, WS_GROUP | WS_TABSTOP
+    AUTORADIOBUTTON "Display &nothing on this monitor", IDC_LEAVE_BLACK, 90, 78, 158, 10
+    AUTOCHECKBOX    "Show the &same animation on every monitor", IDC_SAME_ON_ALL, 84, 100, 169, 10, WS_GROUP | WS_TABSTOP
+    LTEXT           "Note: each monitor gets its own window and OpenGL context, so every screen renders at its native resolution.", -1, 84, 116, 169, 28
+    DEFPUSHBUTTON   "OK", IDOK, 146, 165, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 203, 165, 50, 14
+END

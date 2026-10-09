@@ -1,0 +1,60 @@
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+#include "common.rc"
+
+IDI_MAIN ICON "starfield.ico"
+
+STRINGTABLE
+BEGIN
+    IDS_DESCRIPTION  "3D Starfield"
+    4001             "White"
+    4002             "Tinted"
+    4003             "Rainbow"
+END
+
+IDD_CONFIG DIALOGEX 0, 0, 227, 150
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "3D Starfield Settings"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    GROUPBOX        "Stars", -1, 7, 7, 213, 44
+    LTEXT           "&Colors:", -1, 14, 21, 40, 8
+    COMBOBOX        IDC_COLOR_MODE, 56, 19, 90, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    AUTOCHECKBOX    "&Warp trails", IDC_WARP, 14, 35, 120, 10, WS_TABSTOP
+    GROUPBOX        "Speed", -1, 7, 55, 213, 30
+    LTEXT           "Slow", -1, 14, 68, 20, 8
+    CONTROL         "", IDC_SPEED, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 36, 65, 150, 16
+    LTEXT           "Fast", -1, 192, 68, 20, 8
+    GROUPBOX        "Density", -1, 7, 89, 213, 30
+    LTEXT           "Few", -1, 14, 102, 20, 8
+    CONTROL         "", IDC_DENSITY, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 36, 99, 150, 16
+    LTEXT           "Many", -1, 192, 102, 24, 8
+    PUSHBUTTON      "&Display Settings...", IDC_DISPLAY_SETTINGS, 7, 129, 75, 14
+    DEFPUSHBUTTON   "OK", IDOK, 116, 129, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 170, 129, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "3D Starfield Screen Saver"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "Starfield"
+            VALUE "OriginalFilename", "Starfield.scr"
+            VALUE "ProductName", "Screen Saver Reverse Engineering"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
