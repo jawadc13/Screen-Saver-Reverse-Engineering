@@ -158,7 +158,7 @@ struct Settings {
     DWORD motion = 0;
     DWORD speed = 50;     // 0..100 -> 0.1x .. 4x (50 = 1x)
     DWORD strength = 100; // theme strength %
-    DWORD randomize = 0;  // 1 = pick a new random style every time the saver starts
+    DWORD shuffle = 0;    // RandomWhat bits: options picked at random every time the saver starts
     // OLED screen care (savers with their own rest cycle use theirs instead)
     DWORD restEvery = 0;  // minutes between rests to black, 0 = off
     DWORD restLength = 10;// seconds of black
@@ -180,7 +180,10 @@ inline bool ReadKey(const wchar_t* path, Settings& s) {
     auto rd = [&](const wchar_t* name, DWORD& v) { DWORD d, cb = sizeof(d), type; if (RegQueryValueExW(k, name, nullptr, &type, (BYTE*)&d, &cb) == ERROR_SUCCESS && type == REG_DWORD) v = d; };
     rd(L"Theme", s.theme); rd(L"Pattern", s.pattern); rd(L"Effect", s.effect);
     rd(L"Motion", s.motion); rd(L"Speed", s.speed); rd(L"Strength", s.strength);
-    rd(L"Randomize", s.randomize);
+    DWORD legacy = 0;   // older builds: one "Randomize" switch for everything
+    rd(L"Randomize", legacy);
+    if (legacy == 1) s.shuffle = 31;
+    rd(L"Shuffle", s.shuffle);
     rd(L"RestEvery", s.restEvery); rd(L"RestLength", s.restLength); rd(L"PixelOrbit", s.orbit); rd(L"BurnInGuard", s.guard);
     RegCloseKey(k);
     return true;
@@ -193,7 +196,7 @@ inline void Clamp(Settings& s) {
     if (s.motion >= (DWORD)kMotionCount) s.motion = 0;
     if (s.speed > 100) s.speed = 50;
     if (s.strength > 100) s.strength = 100;
-    if (s.randomize > 1) s.randomize = 1;
+    s.shuffle &= 31;
     if (s.restEvery > 240) s.restEvery = 0;
     if (s.restLength < 3 || s.restLength > 600) s.restLength = 10;
     if (s.orbit > 1) s.orbit = 1;
@@ -201,9 +204,14 @@ inline void Clamp(Settings& s) {
 }
 
 // saverFile: e.g. L"OLED_Lorenz" (the .scr name without extension).
-inline Settings Load(const wchar_t* saverFile) {
+// draft: prefer unsaved changes being previewed (Styles\_Draft\<file>).
+inline Settings Load(const wchar_t* saverFile, bool draft = false) {
     Settings s;
     wchar_t path[300];
+    if (draft) {
+        _snwprintf(path, 300, L"Software\\ScreenSaverRE\\Styles\\_Draft\\%s", saverFile); path[299] = 0;
+        if (ReadKey(path, s)) { Clamp(s); return s; }
+    }
     KeyFor(saverFile, path, 300);
     if (!ReadKey(path, s)) ReadKey(L"Software\\ScreenSaverRE\\Styles\\_All", s);
     Clamp(s);
@@ -218,7 +226,8 @@ inline void Save(const wchar_t* saverFile, const Settings& s) {
     auto wr = [&](const wchar_t* name, DWORD v) { RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(v)); };
     wr(L"Theme", s.theme); wr(L"Pattern", s.pattern); wr(L"Effect", s.effect);
     wr(L"Motion", s.motion); wr(L"Speed", s.speed); wr(L"Strength", s.strength);
-    wr(L"Randomize", s.randomize);
+    wr(L"Shuffle", s.shuffle);
+    RegDeleteValueW(k, L"Randomize");
     wr(L"RestEvery", s.restEvery); wr(L"RestLength", s.restLength); wr(L"PixelOrbit", s.orbit); wr(L"BurnInGuard", s.guard);
     RegCloseKey(k);
 }
@@ -236,6 +245,42 @@ inline float MotionFactor(DWORD motion, float t) {
     case 4: return 0.4f + 1.2f * (0.5f + 0.5f * sinf(t * 0.21f) * sinf(t * 0.077f + 1));                   // time warp
     default: return 1;
     }
+}
+
+// Subkey names of Styles\<sub> (sub = nullptr: Styles itself).
+inline std::vector<std::wstring> ListKeys(const wchar_t* sub) {
+    std::vector<std::wstring> names;
+    std::wstring path = L"Software\\ScreenSaverRE\\Styles";
+    if (sub) path += std::wstring(L"\\") + sub;
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return names;
+    wchar_t name[256];
+    for (DWORD i = 0;; i++) {
+        DWORD cch = 256;
+        if (RegEnumKeyExW(k, i, name, &cch, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        names.push_back(name);
+    }
+    RegCloseKey(k);
+    return names;
+}
+
+inline void DeleteKey(const std::wstring& rel) {
+    RegDeleteKeyW(HKEY_CURRENT_USER, (L"Software\\ScreenSaverRE\\Styles\\" + rel).c_str());
+}
+
+// Unsaved changes shown by a live preview.
+inline void SaveDraft(const wchar_t* saverFile, const Settings& s) { Save((L"_Draft\\" + std::wstring(saverFile)).c_str(), s); }
+inline void DeleteDraft(const wchar_t* saverFile) { DeleteKey(L"_Draft\\" + std::wstring(saverFile)); }
+
+// Named presets: Styles\_Presets\<name>.
+inline std::vector<std::wstring> ListPresets() { return ListKeys(L"_Presets"); }
+inline void SavePreset(const std::wstring& name, const Settings& s) { Save((L"_Presets\\" + name).c_str(), s); }
+inline void DeletePreset(const std::wstring& name) { DeleteKey(L"_Presets\\" + name); }
+inline Settings LoadPreset(const std::wstring& name) {
+    Settings s;
+    ReadKey((L"Software\\ScreenSaverRE\\Styles\\_Presets\\" + name).c_str(), s);
+    Clamp(s);
+    return s;
 }
 
 // "Apply to all": the _All fallback plus every saver that has its own key.
@@ -258,7 +303,7 @@ inline void SaveToAll(const Settings& s) {
 // Randomizer: which options may be picked (shared by every saver), and
 // favourite themes. Stored in HKCU\Software\ScreenSaverRE\Styles\_Random.
 // ---------------------------------------------------------------------------
-enum RandomWhat { RW_THEME = 1, RW_PATTERN = 2, RW_EFFECT = 4, RW_MOTION = 8, RW_SPEED = 16 };
+enum RandomWhat { RW_THEME = 1, RW_PATTERN = 2, RW_EFFECT = 4, RW_MOTION = 8, RW_SPEED = 16, RW_ALL = 31 };
 
 struct RandomPool {
     DWORD pal0 = 0xFFFFFFFF, pal1 = 0xFFFFFFFF;   // palettes 0-31, 32-63
@@ -266,7 +311,6 @@ struct RandomPool {
     DWORD patterns = (1u << kPatternCount) - 1;
     DWORD effects = (1u << kEffectCount) - 1;
     DWORD motions = (1u << kMotionCount) - 1;
-    DWORD what = RW_THEME | RW_PATTERN | RW_EFFECT | RW_MOTION | RW_SPEED;
     DWORD favOnly = 0;        // themes only from the favourites
     DWORD original = 1;       // original colours may come up too
     DWORD speedMin = 35, speedMax = 70;
@@ -282,7 +326,7 @@ inline RandomPool LoadPool() {
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, KEY_READ, &k) != ERROR_SUCCESS) return p;
     auto rd = [&](const wchar_t* name, DWORD& v) { DWORD d, cb = sizeof(d), type; if (RegQueryValueExW(k, name, nullptr, &type, (BYTE*)&d, &cb) == ERROR_SUCCESS && type == REG_DWORD) v = d; };
     rd(L"Palettes1", p.pal0); rd(L"Palettes2", p.pal1); rd(L"Modes", p.modes); rd(L"Patterns", p.patterns);
-    rd(L"Effects", p.effects); rd(L"Motions", p.motions); rd(L"What", p.what); rd(L"FavouritesOnly", p.favOnly);
+    rd(L"Effects", p.effects); rd(L"Motions", p.motions); rd(L"FavouritesOnly", p.favOnly);
     rd(L"Original", p.original); rd(L"SpeedMin", p.speedMin); rd(L"SpeedMax", p.speedMax);
     RegCloseKey(k);
     if (p.speedMin > 100) p.speedMin = 0;
@@ -296,7 +340,7 @@ inline void SavePool(const RandomPool& p) {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
     auto wr = [&](const wchar_t* name, DWORD v) { RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(v)); };
     wr(L"Palettes1", p.pal0); wr(L"Palettes2", p.pal1); wr(L"Modes", p.modes); wr(L"Patterns", p.patterns);
-    wr(L"Effects", p.effects); wr(L"Motions", p.motions); wr(L"What", p.what); wr(L"FavouritesOnly", p.favOnly);
+    wr(L"Effects", p.effects); wr(L"Motions", p.motions); wr(L"FavouritesOnly", p.favOnly);
     wr(L"Original", p.original); wr(L"SpeedMin", p.speedMin); wr(L"SpeedMax", p.speedMax);
     RegCloseKey(k);
 }
@@ -377,14 +421,15 @@ inline int RandomTheme(const RandomPool& p, Rng& r) {
     return 1 + pals[r.Below(np)] + kPaletteCount * mode + kPaletteCount * MODE_COUNT * r.Below(kVariations);
 }
 
-// `base` with the options the pool randomizes replaced by random picks.
-inline Settings Randomize(Settings s, const RandomPool& p, Rng& r) {
-    if (p.what & RW_THEME) s.theme = (DWORD)RandomTheme(p, r);
+// `s` with the options in `what` (RandomWhat bits) replaced by picks the
+// pool allows.
+inline Settings Randomize(Settings s, const RandomPool& p, Rng& r, DWORD what) {
+    if (what & RW_THEME) s.theme = (DWORD)RandomTheme(p, r);
     int v;
-    if ((p.what & RW_PATTERN) && (v = PickBit(p.patterns, kPatternCount, r)) >= 0) s.pattern = v;
-    if ((p.what & RW_EFFECT) && (v = PickBit(p.effects, kEffectCount, r)) >= 0) s.effect = v;
-    if ((p.what & RW_MOTION) && (v = PickBit(p.motions, kMotionCount, r)) >= 0) s.motion = v;
-    if (p.what & RW_SPEED) s.speed = p.speedMin + r.Below((int)(p.speedMax - p.speedMin) + 1);
+    if ((what & RW_PATTERN) && (v = PickBit(p.patterns, kPatternCount, r)) >= 0) s.pattern = v;
+    if ((what & RW_EFFECT) && (v = PickBit(p.effects, kEffectCount, r)) >= 0) s.effect = v;
+    if ((what & RW_MOTION) && (v = PickBit(p.motions, kMotionCount, r)) >= 0) s.motion = v;
+    if (what & RW_SPEED) s.speed = p.speedMin + r.Below((int)(p.speedMax - p.speedMin) + 1);
     return s;
 }
 

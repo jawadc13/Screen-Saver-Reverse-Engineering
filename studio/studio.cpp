@@ -22,11 +22,11 @@
 enum { ID_LIST = 100, ID_SETTINGS, ID_FULLSCREEN, ID_INSTALL, ID_INFO, ID_FILTER };
 static const UINT_PTR kRestartTimer = 1;
 
-struct SaverEntry { std::wstring path, file, name; int group; };
-static const wchar_t* kGroupNames[] = { L"Classic", L"Frutiger Aero", L"OLED (black background)", L"Full-screen OLED-safe" };
+using styleui::SaverInfo;
+using styleui::kGroupNames;
 
 static HWND g_main, g_list, g_filter;
-static std::vector<SaverEntry> g_savers;
+static std::vector<SaverInfo> g_savers;
 static std::vector<int> g_rows;   // list row -> saver index, -1 for group headers
 static int g_cur = -1;
 static styleui::Ui g_ui;
@@ -35,44 +35,11 @@ static styleui::Preview g_preview;
 static RECT g_previewRc;
 
 // ---------------------------------------------------------------------------
-// Saver discovery
+// Saver list
 // ---------------------------------------------------------------------------
-static int GroupOf(const std::wstring& file) {
-    if (file.compare(0, 4, L"Aero") == 0) return 1;
-    if (file.compare(0, 5, L"OLED_") == 0) return 2;
-    if (file.compare(0, 5, L"Safe_") == 0) return 3;
-    return 0;
-}
-
 static void FindSavers() {
-    wchar_t dir[MAX_PATH];
-    GetModuleFileNameW(nullptr, dir, MAX_PATH);
-    wchar_t* slash = wcsrchr(dir, L'\\');
-    if (slash) slash[1] = 0;
-    std::wstring pattern = std::wstring(dir) + L"*.scr";
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pattern.c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
-    do {
-        SaverEntry e;
-        e.path = std::wstring(dir) + fd.cFileName;
-        e.file = fd.cFileName;
-        e.file = e.file.substr(0, e.file.size() - 4);
-        e.name = e.file;
-        // Display name: string resource 1, as the Control Panel reads it.
-        HMODULE m = LoadLibraryExW(e.path.c_str(), nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
-        if (m) {
-            wchar_t buf[256];
-            if (LoadStringW(m, 1, buf, 256) > 0) e.name = buf;
-            FreeLibrary(m);
-        }
-        e.group = GroupOf(e.file);
-        g_savers.push_back(e);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    std::sort(g_savers.begin(), g_savers.end(), [](const SaverEntry& a, const SaverEntry& b) {
-        return a.group != b.group ? a.group < b.group : lstrcmpiW(a.name.c_str(), b.name.c_str()) < 0;
-    });
+    for (const SaverInfo& e : styleui::ScanSavers(styleui::ModuleFolder()))
+        if (!e.path.empty()) g_savers.push_back(e);   // only savers in this folder
 }
 
 static void FillList() {
@@ -81,7 +48,7 @@ static void FillList() {
     g_rows.clear();
     int lastGroup = -1, select = -1;
     for (size_t i = 0; i < g_savers.size(); i++) {
-        const SaverEntry& e = g_savers[i];
+        const SaverInfo& e = g_savers[i];
         if (filter >= 0 && e.group != filter) continue;
         if (e.group != lastGroup) {
             std::wstring head = L"--- " + std::wstring(kGroupNames[e.group]) + L" ---";
@@ -119,17 +86,16 @@ static bool Launch(const std::wstring& path, const std::wstring& args, PROCESS_I
 static void SelectSaver(int idx) {
     if (idx < 0 || idx >= (int)g_savers.size()) return;
     g_cur = idx;
-    g_ed.Load(style::Load(g_savers[idx].file.c_str()));
+    g_ed.Open(g_savers[idx].file);
     std::wstring info = g_savers[idx].name + L"\n" + g_savers[idx].file + L".scr  \x2022  " + kGroupNames[g_savers[idx].group];
     SetDlgItemTextW(g_main, ID_INFO, info.c_str());
     StartPreview();
 }
 
-// Save now, restart the preview shortly (several quick clicks = one restart).
+// Restart the preview shortly (several quick clicks = one restart). The
+// editor has written the change as a draft that only the preview reads.
 static void StyleChanged() {
-    if (g_cur < 0) return;
-    style::Save(g_savers[g_cur].file.c_str(), g_ed.Read());
-    SetTimer(g_main, kRestartTimer, 300, nullptr);
+    if (g_cur >= 0) SetTimer(g_main, kRestartTimer, 300, nullptr);
 }
 
 static void SetAsScreensaver() {
@@ -148,7 +114,7 @@ static void SetAsScreensaver() {
 }
 
 // ---------------------------------------------------------------------------
-// Window (client 936 x 702 at 96 dpi)
+// Window (client 936 x 696 at 96 dpi)
 // ---------------------------------------------------------------------------
 static void CreateControls() {
     styleui::Ui& ui = g_ui;
@@ -157,16 +123,17 @@ static void CreateControls() {
     SendMessageW(g_filter, CB_ADDSTRING, 0, (LPARAM)L"All screensavers");
     for (auto* g : kGroupNames) SendMessageW(g_filter, CB_ADDSTRING, 0, (LPARAM)g);
     SendMessageW(g_filter, CB_SETCURSEL, 0, 0);
-    g_list = ui.Make(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT, 12, 40, 258, 650, ID_LIST, WS_EX_CLIENTEDGE);
+    g_list = ui.Make(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT, 12, 40, 258, 644, ID_LIST, WS_EX_CLIENTEDGE);
 
-    HWND frame = ui.Make(L"STATIC", L"", SS_BLACKRECT, 284, 10, 640, 360, -1);
+    HWND frame = ui.Make(L"STATIC", L"", SS_BLACKRECT, 316, 10, 576, 324, -1);
     GetWindowRect(frame, &g_previewRc);
     MapWindowPoints(nullptr, g_main, (POINT*)&g_previewRc, 2);
-    ui.Make(L"STATIC", L"", 0, 284, 378, 330, 36, ID_INFO, 0, true);
-    ui.Make(L"BUTTON", L"Saver settings...", WS_TABSTOP, 618, 378, 108, 30, ID_SETTINGS);
-    ui.Make(L"BUTTON", L"Full screen", WS_TABSTOP, 730, 378, 84, 30, ID_FULLSCREEN);
-    ui.Make(L"BUTTON", L"Use as my saver", WS_TABSTOP | BS_DEFPUSHBUTTON, 818, 378, 106, 30, ID_INSTALL);
-    g_ed.Create(g_main, 284, 418, ui.dpi, ui.font, ui.bold);
+    ui.Make(L"STATIC", L"", 0, 284, 342, 330, 36, ID_INFO, 0, true);
+    ui.Make(L"BUTTON", L"Saver settings...", WS_TABSTOP, 618, 342, 108, 30, ID_SETTINGS);
+    ui.Make(L"BUTTON", L"Full screen", WS_TABSTOP, 730, 342, 84, 30, ID_FULLSCREEN);
+    ui.Make(L"BUTTON", L"Use as my saver", WS_TABSTOP | BS_DEFPUSHBUTTON, 818, 342, 106, 30, ID_INSTALL);
+    g_ed.Create(g_main, 284, 382, ui.dpi, ui.font, ui.bold);
+    g_ed.folder = styleui::ModuleFolder();
 }
 
 static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -192,7 +159,10 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_LIST:
             if (code == LBN_SELCHANGE) {
                 int row = (int)SendMessageW(g_list, LB_GETCURSEL, 0, 0);
-                if (row >= 0 && row < (int)g_rows.size() && g_rows[row] >= 0 && g_rows[row] != g_cur) SelectSaver(g_rows[row]);
+                if (row >= 0 && row < (int)g_rows.size() && g_rows[row] >= 0 && g_rows[row] != g_cur) {
+                    if (g_ed.ConfirmLeave(h)) SelectSaver(g_rows[row]);
+                    else FillList();   // stay on the current saver
+                }
             } else if (code == LBN_DBLCLK && g_cur >= 0) Launch(g_savers[g_cur].path, L"/s", nullptr);
             return 0;
         case ID_SETTINGS:
@@ -209,7 +179,7 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                     EnableWindow(h, TRUE);
                     SetForegroundWindow(h);
                     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-                    SelectSaver(g_cur);   // settings (and maybe style) changed
+                    StartPreview();   // its settings may have changed
                 }
             }
             return 0;
@@ -225,8 +195,13 @@ static LRESULT CALLBACK MainProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_TIMER:
         if (w == kRestartTimer) { KillTimer(h, kRestartTimer); StartPreview(); }
         return 0;
+    case WM_CLOSE:
+        if (!g_ed.ConfirmLeave(h)) return 0;
+        DestroyWindow(h);
+        return 0;
     case WM_DESTROY:
         g_preview.Stop();
+        g_ed.Discard();
         PostQuitMessage(0);
         return 0;
     }
@@ -252,7 +227,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     const DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_THICKFRAME);
     HWND h = CreateWindowExW(0, L"ScreensaverStudio", L"Screensaver Studio", style,
                              CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, nullptr, nullptr, inst, nullptr);
-    styleui::FitClient(h, g_ui.dpi, 936, 702);
+    styleui::FitClient(h, g_ui.dpi, 936, 696);
     ShowWindow(h, show);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {

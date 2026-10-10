@@ -704,10 +704,11 @@ static int RunSaver() {
     bool same = RegReadDword(L"AllScreensSame", 0) != 0;
     g_showGraph = RegReadDword(L"Show Frame Graph", 0) != 0;
     g_msaa = (int)RegReadDword(L"MSAA", 4);
-    g_style = style::Load(SaverFileName());
-    if (g_style.randomize) {   // a fresh random style every time the saver starts
+    // The preview shows unsaved changes from the Themes & Effects editor.
+    g_style = style::Load(SaverFileName(), g_mode == SM_PREVIEW);
+    if (g_style.shuffle) {   // the "Shuffle" options get a fresh pick every time the saver starts
         style::Rng rng(style::TimeSeed());
-        g_style = style::Randomize(g_style, style::LoadPool(), rng);
+        g_style = style::Randomize(g_style, style::LoadPool(), rng, g_style.shuffle);
     }
     timeBeginPeriod(1);   // 1 ms timer resolution while running
 

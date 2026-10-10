@@ -153,14 +153,23 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 
 * The list on the left shows every `.scr` in the folder, grouped as Classic, Frutiger Aero, OLED and Full-screen OLED-safe.
 * The live preview is the saver itself, started the way Windows starts its preview (`/p`).
-* Any style change is saved and the preview restarts with it.
+* Any style change shows in the preview straight away. It is kept only when you press **Save**; see *Saving* below.
 * **Saver settings...** opens the saver's own settings dialog. **Full screen** runs it for real; any input ends it. Double-clicking a saver does the same.
 * **Use as my saver** makes the selected `.scr` your Windows screen saver from where it is.
-* **Surprise me!** picks a random style. **Apply style to all** sets the current style on every saver.
+* **Surprise me!** picks a random style.
 
-**Every `.scr` has the full Studio editor built in**, with its own live preview. Open it from *Settings → Themes & Effects...* (or *Display Settings → Themes & Effects...* in Pipes, Starfield and Polyhedra). Changes are saved straight away.
+**Every `.scr` has the full Studio editor built in**, with its own live preview. Open it from *Settings → Themes & Effects...* (or *Display Settings → Themes & Effects...* in Pipes, Starfield and Polyhedra). ![Themes & Effects inside a saver](docs/screenshots/themes_dialog.png)
 
-![Themes & Effects inside a saver](docs/screenshots/themes_dialog.png)
+### Saving, presets and copying a style to other savers
+
+* Edits change only the live preview until you save them. The status beside the presets says **Unsaved changes** or **Saved**.
+  * **Save** keeps the edits for this saver and **Revert** throws them away.
+  * In a saver's own window, **Save & Close** saves as it closes.
+  * Closing, or switching saver in the Studio, with unsaved edits asks whether to save them.
+* **Presets** are named styles you can reuse on any saver. **Save as...** stores the current style under a name, **Load** applies a preset, and **Delete** removes it. Loading a preset keeps the current saver's OLED screen-care settings.
+* **Save to savers...** saves the current style to any screensavers you tick. *All*, *None*, *Classic*, *Aero*, *OLED* and *Safe* buttons tick groups quickly. You can also make it the default for every saver that has no style of its own.
+
+![Save to savers](docs/screenshots/save_to.png)
 
 ### OLED screen care on every saver
 
@@ -174,11 +183,10 @@ The full-screen OLED-safe (`Safe_`) savers keep their own rest settings, includi
 
 ### Randomizer and favourites
 
-* Tick **Randomize the style every time it starts** and the saver picks a new theme, pattern, effect, motion and speed each time Windows starts it. **Apply style to all savers** turns this on for every saver at once.
+* Each of theme, pattern, effect, motion and speed has a **Shuffle** tickbox. A shuffled setting gets a new random pick every time Windows starts the saver; the rest keep their saved values. A shuffled control is greyed out, because its own value is only used if nothing can be picked. Shuffle choices are saved per saver, and **Save to savers...** copies them to others.
 * Tick **Favourite** next to a theme to add it to your favourites.
 * **Randomizer & favourites...** controls what the randomizer can pick. The *Random* and *Surprise me!* buttons follow the same rules.
   * Each palette, theme style, pattern, effect and motion has a tickbox. Untick anything you never want to see.
-  * Choose which of theme, pattern, effect, motion and speed get randomized. Anything not randomized keeps the saver's own setting.
   * Limit themes to your favourites, and choose whether the original colours can come up.
   * Set the slowest and fastest random speed.
   * Manage the favourites list.
