@@ -14,6 +14,22 @@
 #define IDC_SAME_ON_ALL            1104
 #define IDC_FRAME_GRAPH            1105
 #define IDC_MSAA                   1106
+#define IDC_STYLE_BUTTON           1107
+
+#define IDD_STYLE                  210   // Themes & Effects
+#define IDC_STYLE_THEME            1200
+#define IDC_STYLE_NAME             1201
+#define IDC_STYLE_PREV             1202
+#define IDC_STYLE_NEXT             1203
+#define IDC_STYLE_RANDOM           1204
+#define IDC_STYLE_PATTERN          1205
+#define IDC_STYLE_EFFECT           1206
+#define IDC_STYLE_MOTION           1207
+#define IDC_STYLE_SPEED            1208
+#define IDC_STYLE_STRENGTH         1209
+#define IDC_STYLE_ALL              1210
+#define IDC_STYLE_RESET            1211
+#define IDC_STYLE_RANGE            1212
 
 #define IDD_SIMPLE_CONFIG          300   // generic settings dialog (simplecfg.cpp)
 

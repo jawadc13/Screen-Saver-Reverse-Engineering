@@ -40,6 +40,8 @@ int   RandI(int lo, int hi);              // uniform int in [lo, hi]
 bool  LoadImageFile(const wchar_t* path, std::vector<unsigned>& bgra, int& w, int& h);
 // Shows the shared "Display Settings" dialog (per-monitor options).
 void  ShowDisplaySettings(HWND parent);
+void  ShowStyleSettings(HWND parent);     // Themes & Effects (theme.h)
+const wchar_t* SaverFileName();           // this .scr's name without extension
 // Shows a string-table message box with the saver's name as caption.
 void  ErrorBox(HWND parent, UINT stringId);
 

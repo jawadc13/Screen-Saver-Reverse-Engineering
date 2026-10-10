@@ -61,6 +61,138 @@ float4 PS(PSIn i) : SV_Target {
 }
 )";
 
+// Style post pass: full-screen triangle that reads the finished scene.
+static const char kPostShader[] = R"(
+cbuffer P : register(b0) {
+    float4 stops[5];
+    float4 grade;   // hue (radians), saturation, contrast, brightness
+    float4 info;    // mode (-1 = none), strength, pattern, effect
+    float4 tr;      // time, width, height, aspect
+};
+Texture2D src : register(t0);
+SamplerState ls : register(s0);
+struct V { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+V PVS(uint id : SV_VertexID) {
+    V o;
+    float2 p = float2((id << 1) & 2, id & 2);
+    o.uv = p;
+    o.pos = float4(p * float2(2, -2) + float2(-1, 1), 0, 1);
+    return o;
+}
+float Lum(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+// atan2 written out (some HLSL compilers, e.g. Wine's, lack it).
+float Atan2(float y, float x) {
+    float ax = abs(x), ay = abs(y);
+    float a = min(ax, ay) / max(max(ax, ay), 1e-8);
+    float s = a * a;
+    float r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a;
+    if (ay > ax) r = 1.57079637 - r;
+    if (x < 0) r = 3.14159274 - r;
+    return y < 0 ? -r : r;
+}
+float Hash(float2 p) { return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453); }
+float3 Ramp(float x) {
+    x = saturate(x) * 4;
+    int i = min((int)x, 3);
+    return lerp(stops[i].rgb, stops[i + 1].rgb, x - i);
+}
+float3 HueRotate(float3 c, float a) {
+    const float3 k = float3(0.57735, 0.57735, 0.57735);
+    float ca = cos(a);
+    return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1 - ca);
+}
+float3 Theme(float3 c) {
+    int mode = (int)info.x;
+    if (mode < 0) return c;
+    float l = Lum(c);
+    float3 t;
+    if (mode == 0)      t = Ramp(l);
+    else if (mode == 1) t = lerp(stops[0].rgb, stops[3].rgb, smoothstep(0, 1, l)) + stops[4].rgb * pow(l, 4);
+    else if (mode == 2) t = c * 0.45 + l * stops[3].rgb * 1.5;
+    else if (mode == 3) t = c;
+    else if (mode == 4) t = lerp(Ramp(l), 1, 0.35) * (0.25 + 0.75 * sqrt(l));
+    else if (mode == 5) t = Ramp(pow(l, 0.6)) * 1.35;
+    else if (mode == 6) t = l * stops[3].rgb / max(max(stops[3].r, max(stops[3].g, stops[3].b)), 0.1);
+    else                t = c + (stops[1].rgb - 0.5) * 0.45 * (1 - l) + (stops[3].rgb - 0.5) * 0.45 * l;
+    t = HueRotate(t, grade.x);
+    t = lerp(Lum(t), t, grade.y);
+    t = (t - 0.5) * grade.z + 0.5;
+    t = max(t, 0) * grade.w;
+    // True black stays black (OLED savers rely on it).
+    t *= saturate(max(c.r, max(c.g, c.b)) * 60);
+    return lerp(c, t, info.y);
+}
+float2 Pattern(float2 uv) {
+    int pat = (int)info.z;
+    float t = tr.x, a = tr.w;
+    float2 c = (uv - 0.5) * float2(a, 1);
+    float r = length(c), ang = Atan2(c.y, c.x);
+    if (pat == 1) uv.x = uv.x > 0.5 ? 1 - uv.x : uv.x;
+    else if (pat == 2) uv.y = uv.y > 0.5 ? 1 - uv.y : uv.y;
+    else if (pat == 3) uv = 0.5 - abs(uv - 0.5);
+    else if (pat >= 4 && pat <= 7) {
+        float n = pat == 4 ? 4 : pat == 5 ? 6 : pat == 6 ? 8 : 12;
+        float s = 6.2831853 / n;
+        float b = ang + t * 0.05;
+        b = b - s * floor(b / s);
+        if (b > s * 0.5) b = s - b;
+        c = r * float2(cos(b), sin(b));
+        uv = c / float2(a, 1) + 0.5;
+    }
+    else if (pat == 8) uv = frac(uv * 2);
+    else if (pat == 9) uv = frac(uv * 3);
+    else if (pat == 10) {
+        float k = pow(1 - saturate(r / 0.75), 2) * 2.5 * sin(t * 0.3);
+        float b = ang + k;
+        uv = r * float2(cos(b), sin(b)) / float2(a, 1) + 0.5;
+    }
+    else if (pat == 11) uv += (r > 0.001 ? c / r : 0) * sin(r * 40 - t * 3) * 0.006 / float2(a, 1);
+    else if (pat == 12) uv = c * lerp(0.45, 1.0, saturate(r * 1.6)) / float2(a, 1) + 0.5;
+    else if (pat == 13) {
+        float b = t * 0.03, cs = cos(b), sn = sin(b);
+        c = float2(c.x * cs - c.y * sn, c.x * sn + c.y * cs) / sqrt(a * a + 1) * 1.02;
+        uv = c / float2(a, 1) + 0.5;
+    }
+    else if (pat == 14) uv = c * (1 - 0.08 * (0.5 + 0.5 * sin(t * 0.6))) / float2(a, 1) + 0.5;
+    else if (pat == 15) { float2 px = tr.yz / 6; uv = (floor(uv * px) + 0.5) / px; }
+    else if (pat == 16) uv = float2(abs(ang) / 3.14159265, frac(0.15 / (r + 0.02) + t * 0.1));   // mirrored angle: no seam
+    return uv;
+}
+float4 PPS(V i) : SV_Target {
+    float2 uv = Pattern(i.uv);
+    int fx = (int)info.w;
+    float t = tr.x;
+    float2 px = 1 / tr.yz;
+    if (fx == 7) {   // glitch: occasional sideways-torn bands
+        float band = floor(uv.y * 40), slot = floor(t * 8);
+        if (Hash(float2(band, slot)) > 0.93) uv.x += (Hash(float2(slot, band)) - 0.5) * 0.08;
+    }
+    float3 c;
+    if (fx == 4 || fx == 7) {   // chromatic aberration
+        float2 d = (uv - 0.5) * (fx == 4 ? 0.008 : 0.004);
+        c = float3(src.SampleLevel(ls, uv + d, 0).r, src.SampleLevel(ls, uv, 0).g, src.SampleLevel(ls, uv - d, 0).b);
+    } else c = src.SampleLevel(ls, uv, 0).rgb;
+    float3 o = Theme(c);
+    float v = length(i.uv - 0.5);
+    if (fx == 1) o *= 1 - 0.6 * pow(saturate(v * 1.3), 2);
+    else if (fx == 2) o *= (0.78 + 0.22 * cos(i.pos.y * 3.14159)) * (0.9 + 0.1 * float3(fmod(i.pos.x, 3) < 1, fmod(i.pos.x + 1, 3) < 1, fmod(i.pos.x + 2, 3) < 1));
+    else if (fx == 3) o += (Hash(i.pos.xy + frac(t) * 97) - 0.5) * 0.07 * saturate(Lum(o) * 20);
+    else if (fx == 5) o = floor(o * 5 + 0.5) / 5;
+    else if (fx == 6) o = o * 0.7 + Theme(src.SampleLevel(ls, uv, 3).rgb) * 0.45 + Theme(src.SampleLevel(ls, uv, 5).rgb) * 0.3;
+    else if (fx == 8) { float l = Lum(o); o = float3(0.15, 1, 0.25) * l * 1.4; o += (Hash(i.pos.xy + frac(t) * 31) - 0.5) * 0.08 * saturate(l * 20); o *= 1 - 0.7 * pow(saturate(v * 1.4), 2); }
+    else if (fx == 9) { float l = Lum(o); o = float3(1.07, 0.74, 0.43) * l * (0.95 + 0.05 * sin(t * 23)); o *= 1 - 0.5 * pow(saturate(v * 1.3), 2); }
+    else if (fx == 10) { float3 b = Theme(src.SampleLevel(ls, uv, 3).rgb) + Theme(src.SampleLevel(ls, uv, 5).rgb); o += max(b * 0.5 - 0.45, 0) * 1.2; }
+    else if (fx == 11) {
+        float l0 = Lum(c);
+        float e = abs(Lum(src.SampleLevel(ls, uv + float2(px.x, 0), 0).rgb) - l0) + abs(Lum(src.SampleLevel(ls, uv + float2(0, px.y), 0).rgb) - l0);
+        o = floor(o * 4 + 0.5) / 4 * (1 - saturate(e * 6));
+    }
+    return float4(saturate(o), 1);
+}
+)";
+
+struct PostConstants { float stops[5][4]; float grade[4]; float info[4]; float tr[4]; };
+
 struct Constants {
     float worldView[16];
     float proj[16];
@@ -126,6 +258,7 @@ Renderer::~Renderer() {
     ReleaseTargets();
     for (auto*& b : blend) SafeRelease(b);
     SafeRelease(depthOn); SafeRelease(depthOff); SafeRelease(raster); SafeRelease(sampler);
+    SafeRelease(postVs); SafeRelease(postPs); SafeRelease(postCb); SafeRelease(postSampler);
     SafeRelease(stream); SafeRelease(cb); SafeRelease(layout); SafeRelease(vs); SafeRelease(ps);
     if (frameWait) CloseHandle(frameWait);
     SafeRelease(swap); SafeRelease(ctx); SafeRelease(dev);
@@ -218,6 +351,16 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     }
     SafeRelease(vsb); SafeRelease(psb);
     if (!ok) return false;
+    // Style post pass (optional: without it styles are simply not applied).
+    if (compile) {
+        compile(kPostShader, sizeof(kPostShader) - 1, "post", nullptr, nullptr, "PVS", "vs_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vsb, nullptr);
+        compile(kPostShader, sizeof(kPostShader) - 1, "post", nullptr, nullptr, "PPS", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &psb, nullptr);
+        if (vsb && psb) {
+            dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &postVs);
+            dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &postPs);
+        }
+        SafeRelease(vsb); SafeRelease(psb);
+    }
 
     // 4. Fixed state objects.
     D3D11_BUFFER_DESC bd = {};
@@ -259,6 +402,11 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     smp.AddressU = smp.AddressV = smp.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     smp.MaxLOD = D3D11_FLOAT32_MAX;
     dev->CreateSamplerState(&smp, &sampler);
+    smp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    smp.AddressU = smp.AddressV = smp.AddressW = D3D11_TEXTURE_ADDRESS_MIRROR;
+    dev->CreateSamplerState(&smp, &postSampler);
+    bd.ByteWidth = sizeof(PostConstants);
+    dev->CreateBuffer(&bd, nullptr, &postCb);
 
     samples = SupportedSamples(dev, wantedSamples);
     CreateTargets();
@@ -309,6 +457,7 @@ void Renderer::ReleaseTargets() {
     SafeRelease(backRtv); SafeRelease(dsv); SafeRelease(depthTex);
     SafeRelease(persistRtv); SafeRelease(persistTex);
     SafeRelease(lumSrv); SafeRelease(lumTex);
+    SafeRelease(postSrv); SafeRelease(postTex);
     for (int i = 0; i < 3; i++) { SafeRelease(lumStaging[i]); lumPending[i] = false; }
 }
 
@@ -332,6 +481,10 @@ void Renderer::BeginFrame(bool clearColor, bool clearDepth) {
     ctx->RSSetViewports(1, &vp);
     if (clearColor) { float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv, black); }
     if (clearDepth || !persistent) ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+    BindScenePipeline();
+}
+
+void Renderer::BindScenePipeline() {
     ctx->IASetInputLayout(layout);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx->VSSetShader(vs, nullptr, 0);
@@ -443,9 +596,55 @@ void Renderer::ResolveToBackBuffer() {
     }
 }
 
+// Scene -> screen, through the style post pass when a style is set.
+void Renderer::FinishScene() {
+    if (!post.Active() || !postVs || !postPs || !postCb || !postSampler) { ResolveToBackBuffer(); return; }
+    if (!postTex) {
+        D3D11_TEXTURE2D_DESC td = {};
+        td.Width = width; td.Height = height;
+        td.MipLevels = 0; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+        if (FAILED(dev->CreateTexture2D(&td, nullptr, &postTex))) { ResolveToBackBuffer(); return; }
+        dev->CreateShaderResourceView(postTex, nullptr, &postSrv);
+        if (!postSrv) { SafeRelease(postTex); ResolveToBackBuffer(); return; }
+    }
+    if (samples > 1) ctx->ResolveSubresource(postTex, 0, persistTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
+    else             ctx->CopySubresourceRegion(postTex, 0, 0, 0, 0, persistTex, 0, nullptr);
+    if (post.effect == 6 || post.effect == 10) ctx->GenerateMips(postSrv);   // blurred levels for glow
+
+    PostConstants c = {};
+    for (int k = 0; k < 5; k++) { c.stops[k][0] = post.stops[k][0]; c.stops[k][1] = post.stops[k][1]; c.stops[k][2] = post.stops[k][2]; }
+    c.grade[0] = post.hue; c.grade[1] = post.saturation; c.grade[2] = post.contrast; c.grade[3] = post.brightness;
+    c.info[0] = (float)post.mode; c.info[1] = post.strength; c.info[2] = (float)post.pattern; c.info[3] = (float)post.effect;
+    c.tr[0] = post.time; c.tr[1] = (float)width; c.tr[2] = (float)height; c.tr[3] = (float)width / height;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (SUCCEEDED(ctx->Map(postCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &c, sizeof(c)); ctx->Unmap(postCb, 0); }
+
+    ctx->OMSetRenderTargets(1, &backRtv, nullptr);
+    D3D11_VIEWPORT vp = { 0, 0, (float)width, (float)height, 0, 1 };
+    ctx->RSSetViewports(1, &vp);
+    float bf[4] = { 0, 0, 0, 0 };
+    ctx->OMSetBlendState(blend[BLEND_OPAQUE], bf, 0xFFFFFFFF);
+    ctx->OMSetDepthStencilState(depthOff, 0);
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(postVs, nullptr, 0);
+    ctx->PSSetShader(postPs, nullptr, 0);
+    ctx->PSSetConstantBuffers(0, 1, &postCb);
+    ctx->PSSetSamplers(0, 1, &postSampler);
+    ctx->PSSetShaderResources(0, 1, &postSrv);
+    ctx->Draw(3, 0);
+    ID3D11ShaderResourceView* none = nullptr;
+    ctx->PSSetShaderResources(0, 1, &none);
+    BindScenePipeline();
+}
+
 void Renderer::BeginOverlay() {
     if (overlayActive || !persistTex) return;
-    ResolveToBackBuffer();
+    FinishScene();
     ctx->OMSetRenderTargets(1, &backRtv, nullptr);
     overlayActive = true;
 }
@@ -475,7 +674,7 @@ void Renderer::FullscreenQuad(float r, float g, float b, float a, BlendMode mode
 }
 
 void Renderer::Present() {
-    if (!overlayActive) ResolveToBackBuffer();
+    if (!overlayActive) FinishScene();
     // Sync interval 1: wait for the vertical blank of *this* monitor.
     HRESULT hr = swap->Present(1, 0);
     if (hr == DXGI_STATUS_OCCLUDED) Sleep(50);   // e.g. screen locked / display off

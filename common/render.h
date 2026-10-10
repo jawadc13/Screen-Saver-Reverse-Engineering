@@ -60,6 +60,17 @@ struct DrawParams {
     float     fogDensity = 0;              // 0 = no fog
 };
 
+// Style post pass (theme.h): recolour, pattern (UV remap) and effect,
+// applied to the finished scene on the way to the screen.
+struct PostParams {
+    int   mode = -1;            // theme mode, -1 = original colours
+    float stops[5][3] = {};
+    float hue = 0, saturation = 1, contrast = 1, brightness = 1, strength = 1;
+    int   pattern = 0, effect = 0;
+    float time = 0;
+    bool Active() const { return mode >= 0 || pattern || effect; }
+};
+
 class Renderer {
 public:
     ~Renderer();
@@ -109,6 +120,7 @@ public:
 
     // OLED care. Shift (and slightly scale up, so edges stay covered) the
     // whole image by a few pixels; restkit.h orbits it slowly.
+    void SetPost(const PostParams& p) { post = p; }
     void SetPixelShift(float dxPixels, float dyPixels, float scale);
     // Queue a tiny (<= 64x64) luminance snapshot of the current scene, and
     // fetch the oldest finished one (0..1 per cell) without stalling the GPU.
@@ -118,6 +130,8 @@ public:
 private:
     void ApplyState(const DrawParams& p);
     void ResolveToBackBuffer();
+    void FinishScene();
+    void BindScenePipeline();
     void CreateLumTargets();
     void CreateTargets();
     void ReleaseTargets();
@@ -150,6 +164,14 @@ private:
     ID3D11DepthStencilState* depthOff = nullptr;
     ID3D11RasterizerState* raster = nullptr;
     ID3D11SamplerState* sampler = nullptr;
+
+    PostParams post;
+    ID3D11VertexShader* postVs = nullptr;
+    ID3D11PixelShader* postPs = nullptr;
+    ID3D11Buffer* postCb = nullptr;
+    ID3D11SamplerState* postSampler = nullptr;
+    ID3D11Texture2D* postTex = nullptr;
+    ID3D11ShaderResourceView* postSrv = nullptr;
 
     Mat4  view = Mat4::Identity(), proj = Mat4::Identity();
     float lightDir[2][4] = {};

@@ -145,6 +145,51 @@ Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flow
 
 Every saver has a **Display Settings...** button. It lets you pick, per monitor, whether to show the saver or nothing, and whether every monitor shows the same animation. It also has an optional frame-time graph.
 
+## Screensaver Studio and styles
+
+**`bin/ScreensaverStudio.exe`** is a standalone app for trying the savers without installing anything. Keep it in the same folder as the `.scr` files and run it.
+
+![Screensaver Studio](docs/screenshots/studio.png)
+
+* The list on the left shows every `.scr` in the folder, grouped as Classic, Frutiger Aero, OLED and Full-screen OLED-safe.
+* The live preview is the saver itself, started the way Windows starts its preview (`/p`).
+* Any style change is saved and the preview restarts with it.
+* **Saver settings...** opens the saver's own settings dialog. **Full screen** runs it for real; any input ends it. Double-clicking a saver does the same.
+* **Use as my saver** makes the selected `.scr` your Windows screen saver from where it is.
+* **Surprise me!** picks a random style. **Apply style to all** sets the current style on every saver.
+
+Every saver also has the same options under *Settings → Display Settings → Themes & Effects...*
+
+![Style examples](docs/screenshots/styles.png)
+*Top: Aero Aurora with its original colours, theme 5 and theme 2000 with Dreamy glow. Bottom: Nebula with its original colours, theme 4123 with Kaleidoscope 12, and theme 7000 with Polar tunnel and Bloom.*
+
+The style options are:
+
+* **10,240 colour themes.** They combine 64 named palettes (Sunset, Vaporwave, Ocean, Sakura, Terminal...) with 8 ways of applying them and 20 variations each. Theme 0 keeps the saver's original colours. The ways of applying a palette are Gradient map, Duotone, Tint, Hue shift, Pastel, Neon, Mono and Split-tone. A strength slider blends the theme with the original colours.
+* **17 patterns:**
+  * Mirror left/right, Mirror top/bottom and Quad mirror
+  * Kaleidoscope 4, 6, 8 and 12
+  * Tile 2×2 and 3×3
+  * Swirl, Ripple and Fisheye
+  * Slow rotate and Zoom pulse
+  * Pixelate (retro) and Polar tunnel
+* **12 effects:**
+  * Vignette, CRT scanlines and Film grain
+  * Chromatic aberration and Glitch
+  * Posterize and Comic (posterize + outlines)
+  * Dreamy glow and Bloom
+  * Night vision and Old film (sepia)
+* **Speed** runs from 0.1× to 4× (the middle is 1×).
+* **Motion styles** keep varying the speed:
+  * Breathing: speed pulses every 6 s.
+  * Tidal: long, slow 40 s waves.
+  * Bursts
+  * Time warp: the speed drifts.
+
+The renderer applies all of this on the GPU in a single full-screen pass over the finished image. That costs well under a millisecond, and nothing is added when the style is left at its defaults. Themes keep true black black, so the OLED savers still leave unused pixels off.
+
+Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
+
 ## Rules every saver follows (same as `sspipes.scr`)
 
 * `/s` runs full screen with one top-most window per monitor and the cursor hidden.
@@ -167,6 +212,7 @@ On Linux with MinGW-w64 (`apt install g++-mingw-w64-x86-64`), or with MSYS2 on W
 ```sh
 make            # -> build/*.scr, one per saver (64-bit)
 make ARCH=x86   # 32-bit build
+                # also builds build/ScreensaverStudio.exe
 ```
 
 ## Installing
@@ -181,6 +227,8 @@ Copy a `.scr` to `C:\Windows\System32`. Then choose it in **Screen saver setting
 common/           shared framework: WinMain, command line, windows, input rules,
                   per-monitor render threads, registry, Display Settings dialog, common resources
                   render.cpp: Direct3D 11 renderer (one device per monitor, on its own GPU)
+                  theme.h: themes, patterns, effects, motion, speed (shared with the Studio)
+studio/           Screensaver Studio (standalone browser and live previewer)
 savers/<name>/    each saver: scene + settings dialog (.cpp), resources (.rc, .ico)
 tools/            pe_inspect.py (analysis), make_icons.py (icon generator)
 docs/             ANALYSIS.md + screenshots

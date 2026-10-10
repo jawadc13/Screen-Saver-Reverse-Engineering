@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <mmsystem.h>
+#include "theme.h"
 
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
@@ -217,6 +218,7 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
                 if (sel >= 0) { s->sel = sel; DisplayDlgShow(dlg, s); }
             }
             return TRUE;
+        case IDC_STYLE_BUTTON: ShowStyleSettings(dlg); return TRUE;
         case IDC_SHOW_SAVER:  s->black[s->sel] = 0; return TRUE;
         case IDC_LEAVE_BLACK: s->black[s->sel] = 1; return TRUE;
         case IDOK: {
@@ -241,6 +243,95 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         break;
     }
     return FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// "Themes & Effects" dialog (same settings Screensaver Studio edits).
+// ---------------------------------------------------------------------------
+const wchar_t* SaverFileName() {
+    static wchar_t name[MAX_PATH];
+    if (!name[0]) {
+        wchar_t path[MAX_PATH];
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        const wchar_t* b = path;
+        for (const wchar_t* q = path; *q; q++) if (*q == L'\\' || *q == L'/') b = q + 1;
+        lstrcpynW(name, b, MAX_PATH);
+        for (wchar_t* q = name + lstrlenW(name); q > name; q--) if (*q == L'.') { *q = 0; break; }
+    }
+    return name;
+}
+
+static void StyleDlgShowName(HWND dlg) {
+    BOOL ok; UINT id = GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
+    wchar_t name[96]; style::ThemeName(ok ? (int)id : 0, name, 96);
+    SetDlgItemTextW(dlg, IDC_STYLE_NAME, name);
+}
+
+static void StyleDlgLoad(HWND dlg, const style::Settings& st) {
+    SetDlgItemInt(dlg, IDC_STYLE_THEME, st.theme, FALSE);
+    SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_SETCURSEL, st.pattern, 0);
+    SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_SETCURSEL, st.effect, 0);
+    SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_SETCURSEL, st.motion, 0);
+    SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETPOS, TRUE, st.speed);
+    SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETPOS, TRUE, st.strength);
+    StyleDlgShowName(dlg);
+}
+
+static style::Settings StyleDlgRead(HWND dlg) {
+    style::Settings st;
+    BOOL ok; UINT id = GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
+    st.theme = ok ? id : 0;
+    st.pattern = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_GETCURSEL, 0, 0);
+    st.effect = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_GETCURSEL, 0, 0);
+    st.motion = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_GETCURSEL, 0, 0);
+    st.speed = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_GETPOS, 0, 0);
+    st.strength = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_GETPOS, 0, 0);
+    style::Clamp(st);
+    return st;
+}
+
+static INT_PTR CALLBACK StyleDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM) {
+    switch (msg) {
+    case WM_INITDIALOG: {
+        for (int i = 0; i < style::kPatternCount; i++) SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_ADDSTRING, 0, (LPARAM)style::kPatternNames[i]);
+        for (int i = 0; i < style::kEffectCount; i++)  SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_ADDSTRING, 0, (LPARAM)style::kEffectNames[i]);
+        for (int i = 0; i < style::kMotionCount; i++)  SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_ADDSTRING, 0, (LPARAM)style::kMotionNames[i]);
+        SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+        SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETTICFREQ, 10, 0);
+        SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+        SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETTICFREQ, 10, 0);
+        wchar_t range[64]; wsprintfW(range, L"(0 = original, 1 - %d)", style::kThemeCount);
+        SetDlgItemTextW(dlg, IDC_STYLE_RANGE, range);
+        StyleDlgLoad(dlg, style::Load(SaverFileName()));
+        return TRUE;
+    }
+    case WM_COMMAND: {
+        BOOL ok; int id = (int)GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
+        if (!ok) id = 0;
+        switch (LOWORD(wp)) {
+        case IDC_STYLE_THEME: if (HIWORD(wp) == EN_CHANGE) StyleDlgShowName(dlg); return TRUE;
+        case IDC_STYLE_PREV:   SetDlgItemInt(dlg, IDC_STYLE_THEME, id > 0 ? id - 1 : style::kThemeCount, FALSE); return TRUE;
+        case IDC_STYLE_NEXT:   SetDlgItemInt(dlg, IDC_STYLE_THEME, id < style::kThemeCount ? id + 1 : 0, FALSE); return TRUE;
+        case IDC_STYLE_RANDOM: SetDlgItemInt(dlg, IDC_STYLE_THEME, 1 + (GetTickCount() * 2654435761u >> 7) % style::kThemeCount, FALSE); return TRUE;
+        case IDC_STYLE_RESET:  StyleDlgLoad(dlg, style::Settings()); return TRUE;
+        case IDC_STYLE_ALL: {
+            style::Settings st = StyleDlgRead(dlg);
+            style::Save(L"_All", st);
+            style::Save(SaverFileName(), st);
+            EndDialog(dlg, IDOK);
+            return TRUE;
+        }
+        case IDOK: style::Save(SaverFileName(), StyleDlgRead(dlg)); EndDialog(dlg, IDOK); return TRUE;
+        case IDCANCEL: EndDialog(dlg, IDCANCEL); return TRUE;
+        }
+        break;
+    }
+    }
+    return FALSE;
+}
+
+void ShowStyleSettings(HWND parent) {
+    DialogBoxParamW(g_hInst, MAKEINTRESOURCEW(IDD_STYLE), parent, StyleDlgProc, 0);
 }
 
 void ShowDisplaySettings(HWND parent) {
@@ -512,6 +603,7 @@ static void JoinMmcss() {
 
 static bool g_showGraph;
 static int  g_msaa = 4;   // anti-aliasing sample count (Display Settings)
+static style::Settings g_style;   // theme / pattern / effect / motion / speed
 
 // Diagnostics overlay: one bar per recent frame, height = time since the
 // previous frame. The white line is one refresh; green bars are on time,
@@ -550,6 +642,18 @@ static void DrawFrameGraph(Renderer& r, const float* hist, int count, int head, 
 // created on the GPU that drives that monitor - its own clock and its own
 // vsync, so a 175 Hz and a 60 Hz monitor on different GPUs never wait on
 // each other or copy frames between GPUs.
+static PostParams MakePost(const style::Settings& st, float time) {
+    PostParams p;
+    style::ThemeParams tp = style::GetTheme((int)st.theme);
+    p.mode = tp.mode;
+    memcpy(p.stops, tp.stops, sizeof(p.stops));
+    p.hue = tp.hueShift; p.saturation = tp.saturation; p.contrast = tp.contrast; p.brightness = tp.brightness;
+    p.strength = st.strength / 100.0f;
+    p.pattern = (int)st.pattern; p.effect = (int)st.effect;
+    p.time = time;
+    return p;
+}
+
 static DWORD WINAPI RenderThread(LPVOID param) {
     auto* w = (SaverWindow*)param;
     g_rng = &w->rng;
@@ -584,6 +688,7 @@ static DWORD WINAPI RenderThread(LPVOID param) {
         float hist[kGraph] = {};
         int histHead = 0;
         double last = Now();
+        double styleTime = 0;
         while (!g_quitting) {
             int nw = w->newW, nh = w->newH;
             if (nw > 0 && nh > 0 && (nw != w->width || nh != w->height)) {
@@ -605,6 +710,12 @@ static DWORD WINAPI RenderThread(LPVOID param) {
             double frames = floor(dt / period + 0.5);
             if (frames >= 1 && fabs(dt - frames * period) < 0.15 * period) dt = frames * period;
             if (dt > 0.1) dt = 0.1;   // avoid big jumps after stalls
+            // Style: speed and motion scale the scene's clock; the theme,
+            // pattern and effect are applied by the renderer's post pass.
+            styleTime += dt;
+            dt *= style::SpeedMultiplier(g_style.speed) * style::MotionFactor(g_style.motion, (float)styleTime);
+            if (dt > 0.25) dt = 0.25;
+            r->SetPost(MakePost(g_style, (float)styleTime));
             if (w->width > 0 && w->height > 0) {
                 w->scene->Frame(*r, (float)dt);
                 if (g_showGraph && g_mode != SM_PREVIEW) DrawFrameGraph(*r, hist, kGraph, histHead, period);
@@ -649,6 +760,7 @@ static int RunSaver() {
     bool same = RegReadDword(L"AllScreensSame", 0) != 0;
     g_showGraph = RegReadDword(L"Show Frame Graph", 0) != 0;
     g_msaa = (int)RegReadDword(L"MSAA", 4);
+    g_style = style::Load(SaverFileName());
     timeBeginPeriod(1);   // 1 ms timer resolution while running
 
     wchar_t title[128];
