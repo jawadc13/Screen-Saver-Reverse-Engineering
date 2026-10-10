@@ -37,6 +37,27 @@ The full findings are in **[docs/ANALYSIS.md](docs/ANALYSIS.md)**: identity, imp
 | ![](docs/screenshots/plasma.png) | ![](docs/screenshots/flowerbox.png) |
 | ![](docs/screenshots/ribbons.png) | ![](docs/screenshots/starfield.png) |
 
+### Frutiger Aero collection
+
+Glossy glass, aqua and fresh green, bubbles, bokeh and sunlight: the look of Windows Vista and 7. All of these are drawn from procedural textures (`common/aerokit.h`), so they need no image files and stay sharp at any resolution.
+
+| File | Scene | Settings |
+|---|---|---|
+| `AeroAurora.scr` | Flowing wisps of light over a deep blue-green glow, with drifting bokeh | Palette; Speed; Number of wisps; Bokeh |
+| `AeroOrbs.scr` | Glossy gel orbs, like Aero buttons set free, rising through the sky and nudging each other | Orb colors; Background; Speed; Number; Size |
+| `AeroMeadow.scr` | Glossy rolling hills, fluffy clouds, turning sun rays and lens flare | Time of day; Lens flare; Wind; Clouds |
+| `AeroAquarium.scr` | Sunlit lagoon with light shafts, glossy tropical fish, bubbles and swaying seaweed | Water; Swim speed; Fish; Bubbles |
+| `AeroGlassPanes.scr` | Translucent panes of Aero glass with gloss and bright edges drifting in 3D | Glass tint; Backdrop; Speed; Number |
+| `AeroBokeh.scr` | Soft out-of-focus lights at different depths, with sparkles | Palette; Speed; Number; Size |
+
+| | |
+|---|---|
+| ![](docs/screenshots/aero_aurora.png) | ![](docs/screenshots/aero_orbs.png) |
+| ![](docs/screenshots/aero_meadow.png) | ![](docs/screenshots/aero_aquarium.png) |
+| ![](docs/screenshots/aero_glasspanes.png) | ![](docs/screenshots/aero_bokeh.png) |
+
+![](docs/screenshots/aero_portrait.png)
+
 Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flower Box):
 
 ![](docs/screenshots/portrait.png)

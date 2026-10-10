@@ -156,8 +156,97 @@ def flowerbox(x, y):
     return (0, 0, 0, 0)
 
 
+
+def sky_bg(y, top=(40, 130, 240), bottom=(200, 240, 255)):
+    t = y / 31.0
+    return tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)) + (255,)
+
+
+def glossy_orb(x, y, cx, cy, r, tint):
+    d = math.hypot(x - cx, y - cy)
+    if d > r:
+        return None
+    rim = (d / r) ** 3
+    base = [int(c * (0.55 + 0.45 * rim)) for c in tint]
+    ex, ey = (x - cx) / (r * 0.7), (y - (cy - r * 0.42)) / (r * 0.42)
+    if ex * ex + ey * ey < 1:
+        k = 0.75 * (1 - (y - (cy - r)) / r)
+        base = [int(c + (255 - c) * max(0, k)) for c in base]
+    return tuple(min(255, c) for c in base) + (255,)
+
+
+def aurora(x, y):
+    bg = sky_bg(y, (0, 20, 60), (0, 100, 110))
+    for k, (h, a) in enumerate(((0.38, 1.0), (0.52, 0.8))):
+        cy = 14 + 6 * math.sin(x * 0.2 + k * 2) + k * 5
+        d = abs(y - cy)
+        if d < 4:
+            g = (1 - d / 4) * a
+            c = hsv(h, 0.6, 1)
+            bg = tuple(min(255, int(bg[i] + c[i] * g)) for i in range(3)) + (255,)
+    return bg
+
+
+def orbs(x, y):
+    for cx, cy, r, tint in ((12, 18, 9, (60, 190, 255)), (24, 9, 6, (140, 240, 70)), (25, 25, 4, (60, 190, 255))):
+        o = glossy_orb(x, y, cx, cy, r, tint)
+        if o:
+            return o
+    return sky_bg(y)
+
+
+def meadow(x, y):
+    hill1 = 20 + 3 * math.sin(x * 0.18 + 1)
+    hill2 = 25 + 2 * math.sin(x * 0.25 + 3)
+    if y > hill2:
+        return (40, 140, 20, 255)
+    if y > hill1:
+        return (110, 200, 60, 255) if y - hill1 > 1 else (200, 245, 160, 255)
+    if math.hypot(x - 9, y - 9) < 4:
+        return (255, 255, 230, 255)
+    if (x - 22) ** 2 / 36 + (y - 9) ** 2 / 9 < 1:
+        return (255, 255, 255, 255)
+    return sky_bg(y)
+
+
+def aquarium(x, y):
+    bg = sky_bg(y, (120, 230, 255), (10, 90, 160))
+    if (x - 16) ** 2 / 64 + (y - 16) ** 2 / 20 < 1:
+        o = glossy_orb(x, y, 16, 16, 8, (255, 140, 30))
+        return o if o else (255, 140, 30, 255)
+    if 22 <= x <= 28 and abs(y - 16) < (x - 22) * 0.9:
+        return (255, 190, 90, 255)
+    for cx, cy in ((7, 8), (10, 4), (26, 7)):
+        if math.hypot(x - cx, y - cy) < 1.6:
+            return (230, 250, 255, 255)
+    return bg
+
+
+def glasspanes(x, y):
+    bg = sky_bg(y, (0, 40, 90), (0, 120, 140))
+    for x0, y0, w, h in ((4, 6, 16, 12), (13, 14, 16, 12)):
+        if x0 <= x < x0 + w and y0 <= y < y0 + h:
+            edge = x in (x0, x0 + w - 1) or y in (y0, y0 + h - 1)
+            gloss = y < y0 + h * 0.45
+            k = 0.9 if edge else (0.45 if gloss else 0.22)
+            bg = tuple(int(bg[i] + (230 - bg[i]) * k) for i in range(3)) + (255,)
+    return bg
+
+
+def bokeh(x, y):
+    bg = sky_bg(y, (0, 70, 120), (80, 190, 90))
+    for cx, cy, r, c in ((9, 10, 7, (120, 240, 255)), (22, 18, 8, (200, 255, 120)), (15, 26, 4, (255, 255, 255)), (26, 6, 3, (160, 255, 220))):
+        d = math.hypot(x - cx, y - cy)
+        if d < r:
+            k = 0.35 + 0.35 * (d / r) ** 4
+            bg = tuple(min(255, int(bg[i] + c[i] * k)) for i in range(3)) + (255,)
+    return bg
+
+
 for name, fn in (('pipes', pipes), ('starfield', starfield), ('polyhedra', polyhedra),
                  ('mystify', mystify), ('matrix', matrix), ('tunnel', tunnel), ('ribbons', ribbons),
-                 ('bubbles', bubbles), ('plasma', plasma), ('fireworks', fireworks), ('flowerbox', flowerbox)):
+                 ('bubbles', bubbles), ('plasma', plasma), ('fireworks', fireworks), ('flowerbox', flowerbox),
+                 ('aurora', aurora), ('orbs', orbs), ('meadow', meadow), ('aquarium', aquarium),
+                 ('glasspanes', glasspanes), ('bokeh', bokeh)):
     write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), fn)
     print('wrote', name)
