@@ -108,11 +108,22 @@ struct Column {
     float hue;
 };
 
+// Per-cell state. Brightness is kept per glyph and decays continuously over
+// time, so the trail fades smoothly instead of stepping a level every time
+// the head moves down a row.
+struct Cell {
+    unsigned char glyph, prevGlyph;
+    float glow;       // 0..1 brightness, set to 1 when the head passes
+    float decay;      // per-second decay rate (from the column's trail length)
+    float swap;       // 0..1 cross-fade from prevGlyph to glyph
+    float hue;
+};
+
 class MatrixScene : public Scene {
     Texture* atlas = nullptr;
     int glyphCount = 1;
     std::vector<Column> cols;
-    std::vector<unsigned char> grid;   // glyph per cell
+    std::vector<Cell> grid;
     int nCols = 1, nRows = 1;
     float cell = 20, flicker = 0;
     int width = 1, height = 1;
@@ -134,18 +145,27 @@ class MatrixScene : public Scene {
         nRows = (int)(height / cell) + 1;
         cols.resize(nCols);
         for (auto& c : cols) ResetColumn(c, true);
-        grid.resize((size_t)nCols * nRows);
-        for (auto& g : grid) g = (unsigned char)RandI(0, glyphCount - 1);
+        grid.assign((size_t)nCols * nRows, Cell());
+        for (auto& g : grid) {
+            g.glyph = g.prevGlyph = (unsigned char)RandI(0, glyphCount - 1);
+            g.glow = 0; g.decay = 1; g.swap = 1; g.hue = 0;
+        }
     }
 
-    Color Tint(const Column& c, float bright) const {
+    Color Tint(float hue, float bright) const {
         switch (g_cfg.choice[0]) {
         case 1:  return Color(0.2f, 0.9f, 1.0f) * bright;
         case 2:  return Color(1.0f, 0.7f, 0.15f) * bright;
         case 3:  return Color(1.0f, 0.15f, 0.1f) * bright;
-        case 4:  return Hsv(c.hue, 0.8f, 1) * bright;
+        case 4:  return Hsv(hue, 0.8f, 1) * bright;
         default: return Color(0.15f, 1.0f, 0.3f) * bright;
         }
+    }
+
+    void Glyph(int g, float x0, float y1, const Color& col) {
+        const float du = 1.0f / kAtlasCols, dv = 1.0f / kAtlasRows;
+        float u0 = (g % kAtlasCols) * du, v0 = (g / kAtlasCols) * dv;
+        canvas.Rect(x0, y1 - cell, x0 + cell, y1, col, u0, v0, u0 + du, v0 + dv);
     }
 
 public:
@@ -168,28 +188,57 @@ public:
     }
 
     void Frame(Renderer& r, float dt) override {
-        // Random glyphs change now and then, like the film.
+        // Random glyphs change now and then, cross-fading over ~0.2 s.
         flicker += dt * nCols * 3;
-        while (flicker >= 1) { flicker -= 1; grid[RandI(0, (int)grid.size() - 1)] = (unsigned char)RandI(0, glyphCount - 1); }
+        while (flicker >= 1) {
+            flicker -= 1;
+            Cell& c = grid[RandI(0, (int)grid.size() - 1)];
+            c.prevGlyph = c.glyph;
+            c.glyph = (unsigned char)RandI(0, glyphCount - 1);
+            c.swap = 0;
+        }
+
+        // Advance the heads; every cell a head enters lights up fully.
+        for (int x = 0; x < nCols; x++) {
+            Column& c = cols[x];
+            int before = (int)floorf(c.head);
+            c.head += c.speed * dt;
+            int after = (int)floorf(c.head);
+            // Fade to ~5% over the column's trail length: smooth exponential decay.
+            float decay = logf(20.0f) * c.speed / c.length;
+            for (int y = before + 1; y <= after; y++) {
+                if (y < 0 || y >= nRows) continue;
+                Cell& cl = grid[(size_t)y * nCols + x];
+                cl.glow = 1; cl.decay = decay; cl.hue = c.hue;
+            }
+            if (c.head > nRows + 1) ResetColumn(c, false);
+        }
 
         r.BeginFrame(true);
         canvas.Begin(width, height);
-        const float du = 1.0f / kAtlasCols, dv = 1.0f / kAtlasRows;
         const float left = -width * 0.5f, top = height * 0.5f;
-        for (int x = 0; x < nCols; x++) {
-            Column& c = cols[x];
-            c.head += c.speed * dt;
-            if (c.head - c.length > nRows) ResetColumn(c, false);
-            int head = (int)floorf(c.head);
-            for (int k = 0; k < c.length; k++) {
-                int y = head - k;
-                if (y < 0 || y >= nRows) continue;
-                float t = 1.0f - (float)k / c.length;
-                Color col = k == 0 ? Color(0.9f, 1, 0.95f) : Tint(c, powf(t, 1.5f) * 1.1f + 0.08f);
-                int g = grid[(size_t)y * nCols + x];
-                float u0 = (g % kAtlasCols) * du, v0 = (g / kAtlasCols) * dv;
+        for (int y = 0; y < nRows; y++) {
+            for (int x = 0; x < nCols; x++) {
+                Cell& cl = grid[(size_t)y * nCols + x];
+                cl.glow *= expf(-cl.decay * dt);
+                if (cl.swap < 1) cl.swap = fminf(1, cl.swap + dt * 5);
+                // The head glyph glows white, handing over smoothly to the next
+                // row as the head moves (by its fractional position).
+                const Column& c = cols[x];
+                int h = (int)floorf(c.head);
+                float frac = c.head - h, white = 0;
+                if (y == h) white = frac;
+                else if (y == h - 1) white = 1 - frac;
+                if (cl.glow < 0.004f && white <= 0) continue;
+                float b = powf(cl.glow, 1.3f) * 1.1f;
+                Color col = Lerp(Tint(cl.hue, b), Color(0.9f, 1, 0.95f), white * 0.85f);
                 float x0 = left + x * cell, y1 = top - y * cell;
-                canvas.Rect(x0, y1 - cell, x0 + cell, y1, col, u0, v0, u0 + du, v0 + dv);
+                if (cl.swap < 1) {   // additive cross-fade between old and new glyph
+                    Glyph(cl.prevGlyph, x0, y1, col * (1 - cl.swap));
+                    Glyph(cl.glyph, x0, y1, col * cl.swap);
+                } else {
+                    Glyph(cl.glyph, x0, y1, col);
+                }
             }
         }
         canvas.Draw(r, BLEND_ADD, atlas);
