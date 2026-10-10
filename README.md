@@ -221,7 +221,7 @@ The style options are:
 
 The renderer applies all of this on the GPU in a single full-screen pass over the finished image. That costs well under a millisecond, and nothing is added when the style is left at its defaults. Themes keep true black black, so the OLED savers still leave unused pixels off.
 
-The randomizer settings and favourites are shared by every saver and live in `Styles\_Random`. Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
+The randomizer settings and favourites are shared by every saver and live in `Styles\_Random`. Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. Presets live in `Styles\_Presets\<name>`. Unsaved edits are kept in `Styles\_Draft` only while the editor is open; only the preview reads them. The default set by *Save to savers...* is `Styles\_All`.
 
 ## Rules every saver follows (same as `sspipes.scr`)
 
