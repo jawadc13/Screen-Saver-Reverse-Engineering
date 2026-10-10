@@ -14,6 +14,8 @@
 #include <windows.h>
 #include <math.h>
 #include <stdio.h>
+#include <vector>
+#include <string>
 
 namespace style {
 
@@ -156,6 +158,7 @@ struct Settings {
     DWORD motion = 0;
     DWORD speed = 50;     // 0..100 -> 0.1x .. 4x (50 = 1x)
     DWORD strength = 100; // theme strength %
+    DWORD randomize = 0;  // 1 = pick a new random style every time the saver starts
 };
 
 // 0 = 0.1x, 50 = 1x, 100 = 4x (log scale on each side).
@@ -172,6 +175,7 @@ inline bool ReadKey(const wchar_t* path, Settings& s) {
     auto rd = [&](const wchar_t* name, DWORD& v) { DWORD d, cb = sizeof(d), type; if (RegQueryValueExW(k, name, nullptr, &type, (BYTE*)&d, &cb) == ERROR_SUCCESS && type == REG_DWORD) v = d; };
     rd(L"Theme", s.theme); rd(L"Pattern", s.pattern); rd(L"Effect", s.effect);
     rd(L"Motion", s.motion); rd(L"Speed", s.speed); rd(L"Strength", s.strength);
+    rd(L"Randomize", s.randomize);
     RegCloseKey(k);
     return true;
 }
@@ -183,6 +187,7 @@ inline void Clamp(Settings& s) {
     if (s.motion >= (DWORD)kMotionCount) s.motion = 0;
     if (s.speed > 100) s.speed = 50;
     if (s.strength > 100) s.strength = 100;
+    if (s.randomize > 1) s.randomize = 1;
 }
 
 // saverFile: e.g. L"OLED_Lorenz" (the .scr name without extension).
@@ -203,6 +208,7 @@ inline void Save(const wchar_t* saverFile, const Settings& s) {
     auto wr = [&](const wchar_t* name, DWORD v) { RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(v)); };
     wr(L"Theme", s.theme); wr(L"Pattern", s.pattern); wr(L"Effect", s.effect);
     wr(L"Motion", s.motion); wr(L"Speed", s.speed); wr(L"Strength", s.strength);
+    wr(L"Randomize", s.randomize);
     RegCloseKey(k);
 }
 
@@ -215,6 +221,156 @@ inline float MotionFactor(DWORD motion, float t) {
     case 4: return 0.4f + 1.2f * (0.5f + 0.5f * sinf(t * 0.21f) * sinf(t * 0.077f + 1));                   // time warp
     default: return 1;
     }
+}
+
+// "Apply to all": the _All fallback plus every saver that has its own key.
+inline void SaveToAll(const Settings& s) {
+    Save(L"_All", s);
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\ScreenSaverRE\\Styles", 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    std::vector<std::wstring> names;
+    wchar_t name[256];
+    for (DWORD i = 0;; i++) {
+        DWORD cch = 256;
+        if (RegEnumKeyExW(k, i, name, &cch, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        if (name[0] != L'_') names.push_back(name);
+    }
+    RegCloseKey(k);
+    for (const std::wstring& n : names) Save(n.c_str(), s);
+}
+
+// ---------------------------------------------------------------------------
+// Randomizer: which options may be picked (shared by every saver), and
+// favourite themes. Stored in HKCU\Software\ScreenSaverRE\Styles\_Random.
+// ---------------------------------------------------------------------------
+enum RandomWhat { RW_THEME = 1, RW_PATTERN = 2, RW_EFFECT = 4, RW_MOTION = 8, RW_SPEED = 16 };
+
+struct RandomPool {
+    DWORD pal0 = 0xFFFFFFFF, pal1 = 0xFFFFFFFF;   // palettes 0-31, 32-63
+    DWORD modes = (1u << MODE_COUNT) - 1;
+    DWORD patterns = (1u << kPatternCount) - 1;
+    DWORD effects = (1u << kEffectCount) - 1;
+    DWORD motions = (1u << kMotionCount) - 1;
+    DWORD what = RW_THEME | RW_PATTERN | RW_EFFECT | RW_MOTION | RW_SPEED;
+    DWORD favOnly = 0;        // themes only from the favourites
+    DWORD original = 1;       // original colours may come up too
+    DWORD speedMin = 35, speedMax = 70;
+    bool Palette(int i) const { return ((i < 32 ? pal0 : pal1) >> (i & 31)) & 1; }
+    void SetPalette(int i, bool on) { DWORD& m = i < 32 ? pal0 : pal1; m = on ? m | (1u << (i & 31)) : m & ~(1u << (i & 31)); }
+};
+
+static const wchar_t kRandomKey[] = L"Software\\ScreenSaverRE\\Styles\\_Random";
+
+inline RandomPool LoadPool() {
+    RandomPool p;
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, KEY_READ, &k) != ERROR_SUCCESS) return p;
+    auto rd = [&](const wchar_t* name, DWORD& v) { DWORD d, cb = sizeof(d), type; if (RegQueryValueExW(k, name, nullptr, &type, (BYTE*)&d, &cb) == ERROR_SUCCESS && type == REG_DWORD) v = d; };
+    rd(L"Palettes1", p.pal0); rd(L"Palettes2", p.pal1); rd(L"Modes", p.modes); rd(L"Patterns", p.patterns);
+    rd(L"Effects", p.effects); rd(L"Motions", p.motions); rd(L"What", p.what); rd(L"FavouritesOnly", p.favOnly);
+    rd(L"Original", p.original); rd(L"SpeedMin", p.speedMin); rd(L"SpeedMax", p.speedMax);
+    RegCloseKey(k);
+    if (p.speedMin > 100) p.speedMin = 0;
+    if (p.speedMax > 100) p.speedMax = 100;
+    if (p.speedMax < p.speedMin) p.speedMax = p.speedMin;
+    return p;
+}
+
+inline void SavePool(const RandomPool& p) {
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
+    auto wr = [&](const wchar_t* name, DWORD v) { RegSetValueExW(k, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(v)); };
+    wr(L"Palettes1", p.pal0); wr(L"Palettes2", p.pal1); wr(L"Modes", p.modes); wr(L"Patterns", p.patterns);
+    wr(L"Effects", p.effects); wr(L"Motions", p.motions); wr(L"What", p.what); wr(L"FavouritesOnly", p.favOnly);
+    wr(L"Original", p.original); wr(L"SpeedMin", p.speedMin); wr(L"SpeedMax", p.speedMax);
+    RegCloseKey(k);
+}
+
+// Favourite theme numbers, kept as text ("12,345,9001") in _Random\Favourites.
+inline std::vector<int> LoadFavourites() {
+    std::vector<int> v;
+    wchar_t buf[8192]; DWORD cb = sizeof(buf) - sizeof(wchar_t), type;
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, KEY_READ, &k) != ERROR_SUCCESS) return v;
+    if (RegQueryValueExW(k, L"Favourites", nullptr, &type, (BYTE*)buf, &cb) == ERROR_SUCCESS && type == REG_SZ) {
+        buf[cb / sizeof(wchar_t)] = 0;
+        int n = 0; bool any = false;
+        for (const wchar_t* q = buf;; q++) {
+            if (*q >= L'0' && *q <= L'9') { n = n * 10 + (*q - L'0'); any = true; if (n > kThemeCount) n = kThemeCount + 1; }
+            else { if (any && n >= 1 && n <= kThemeCount) v.push_back(n); n = 0; any = false; if (!*q) break; }
+        }
+    }
+    RegCloseKey(k);
+    return v;
+}
+
+inline void SaveFavourites(const std::vector<int>& v) {
+    std::wstring s;
+    for (size_t i = 0; i < v.size() && i < 1000; i++) { if (i) s += L','; s += std::to_wstring(v[i]); }
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRandomKey, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
+    RegSetValueExW(k, L"Favourites", 0, REG_SZ, (const BYTE*)s.c_str(), (DWORD)((s.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(k);
+}
+
+inline bool IsFavourite(int id) {
+    for (int f : LoadFavourites()) if (f == id) return true;
+    return false;
+}
+
+inline void SetFavourite(int id, bool on) {
+    if (id < 1 || id > kThemeCount) return;
+    std::vector<int> v = LoadFavourites(), out;
+    for (int f : v) if (f != id) out.push_back(f);
+    if (on) out.push_back(id);
+    SaveFavourites(out);
+}
+
+struct Rng {
+    unsigned s;
+    explicit Rng(unsigned seed) : s(seed ? seed : 0x9E3779B9u) {}
+    unsigned Next() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; }
+    int Below(int n) { return n > 0 ? (int)(Next() % (unsigned)n) : 0; }
+};
+
+inline unsigned TimeSeed() {
+    LARGE_INTEGER q; QueryPerformanceCounter(&q);
+    return (unsigned)q.QuadPart ^ (unsigned)(q.QuadPart >> 32) ^ GetCurrentProcessId() * 2654435761u;
+}
+
+// A random set bit of `mask` (bits 0..count-1), or -1 if none are set.
+inline int PickBit(DWORD mask, int count, Rng& r) {
+    int n = 0;
+    for (int i = 0; i < count; i++) n += (mask >> i) & 1;
+    if (!n) return -1;
+    int k = r.Below(n);
+    for (int i = 0; i < count; i++) if (((mask >> i) & 1) && k-- == 0) return i;
+    return -1;
+}
+
+// A theme the pool allows (0 = original colours).
+inline int RandomTheme(const RandomPool& p, Rng& r) {
+    if (p.favOnly) {
+        std::vector<int> f = LoadFavourites();
+        if (!f.empty()) return f[r.Below((int)f.size())];
+    }
+    if (p.original && r.Below(12) == 0) return 0;
+    int pals[64], np = 0;
+    for (int i = 0; i < kPaletteCount; i++) if (p.Palette(i)) pals[np++] = i;
+    int mode = PickBit(p.modes, MODE_COUNT, r);
+    if (!np || mode < 0) return p.original ? 0 : 1 + r.Below(kThemeCount);
+    return 1 + pals[r.Below(np)] + kPaletteCount * mode + kPaletteCount * MODE_COUNT * r.Below(kVariations);
+}
+
+// `base` with the options the pool randomizes replaced by random picks.
+inline Settings Randomize(Settings s, const RandomPool& p, Rng& r) {
+    if (p.what & RW_THEME) s.theme = (DWORD)RandomTheme(p, r);
+    int v;
+    if ((p.what & RW_PATTERN) && (v = PickBit(p.patterns, kPatternCount, r)) >= 0) s.pattern = v;
+    if ((p.what & RW_EFFECT) && (v = PickBit(p.effects, kEffectCount, r)) >= 0) s.effect = v;
+    if ((p.what & RW_MOTION) && (v = PickBit(p.motions, kMotionCount, r)) >= 0) s.motion = v;
+    if (p.what & RW_SPEED) s.speed = p.speedMin + r.Below((int)(p.speedMax - p.speedMin) + 1);
+    return s;
 }
 
 }  // namespace style

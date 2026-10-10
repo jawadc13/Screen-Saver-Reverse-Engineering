@@ -38,37 +38,6 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 203, 165, 50, 14
 END
 
-IDD_STYLE DIALOGEX 0, 0, 260, 196
-STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Themes & Effects"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    GROUPBOX        "Colour theme", -1, 7, 4, 246, 54
-    LTEXT           "Theme &number:", -1, 14, 18, 52, 8
-    EDITTEXT        IDC_STYLE_THEME, 68, 16, 40, 12, ES_NUMBER | WS_TABSTOP
-    LTEXT           "", IDC_STYLE_RANGE, 114, 18, 134, 8
-    PUSHBUTTON      "< &Prev", IDC_STYLE_PREV, 14, 36, 40, 14
-    PUSHBUTTON      "&Next >", IDC_STYLE_NEXT, 58, 36, 40, 14
-    PUSHBUTTON      "&Random", IDC_STYLE_RANDOM, 102, 36, 40, 14
-    LTEXT           "", IDC_STYLE_NAME, 148, 39, 100, 8
-    LTEXT           "P&attern:", -1, 7, 68, 50, 8
-    COMBOBOX        IDC_STYLE_PATTERN, 60, 66, 193, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "&Effect:", -1, 7, 86, 50, 8
-    COMBOBOX        IDC_STYLE_EFFECT, 60, 84, 193, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "&Motion:", -1, 7, 104, 50, 8
-    COMBOBOX        IDC_STYLE_MOTION, 60, 102, 193, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "&Speed:", -1, 7, 124, 50, 8
-    LTEXT           "Slow", -1, 60, 124, 20, 8
-    CONTROL         "", IDC_STYLE_SPEED, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 80, 120, 150, 16
-    LTEXT           "Fast", -1, 233, 124, 20, 8
-    LTEXT           "Theme s&trength:", -1, 7, 146, 52, 8
-    CONTROL         "", IDC_STYLE_STRENGTH, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 80, 142, 150, 16
-    PUSHBUTTON      "Reset", IDC_STYLE_RESET, 7, 175, 44, 14
-    PUSHBUTTON      "Apply to &all savers", IDC_STYLE_ALL, 55, 175, 80, 14
-    DEFPUSHBUTTON   "OK", IDOK, 146, 175, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 203, 175, 50, 14
-END
-
 // Generic settings dialog; simplecfg.cpp positions and labels the rows.
 IDD_SIMPLE_CONFIG DIALOGEX 0, 0, 227, 200
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
@@ -99,6 +68,7 @@ BEGIN
     CONTROL         "", 1333, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 0, 0, 10, 16
     LTEXT           "", 1353, 0, 0, 10, 8
     PUSHBUTTON      "&Display Settings...", 1361, 7, 179, 75, 14
+    PUSHBUTTON      "&Themes && Effects...", 1362, 86, 179, 80, 14
     DEFPUSHBUTTON   "OK", IDOK, 116, 179, 50, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 170, 179, 50, 14
 END

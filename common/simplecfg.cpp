@@ -5,7 +5,7 @@
 
 // Control IDs inside IDD_SIMPLE_CONFIG (common.rc).
 enum {
-    IDC_SC_GROUP = 1360, IDC_SC_DISPLAY = 1361,
+    IDC_SC_GROUP = 1360, IDC_SC_DISPLAY = 1361, IDC_SC_STYLE = 1362,
     IDC_SC_CLABEL = 1300, IDC_SC_COMBO = 1310,
     IDC_SC_SLABEL = 1320, IDC_SC_SLIDER = 1330, IDC_SC_LOW = 1340, IDC_SC_HIGH = 1350,
 };
@@ -52,7 +52,7 @@ static void Layout(HWND dlg, SimpleConfig& c) {
             SendMessageW(combo, CB_SETCURSEL, c.choice[i], 0);
         }
         Place(dlg, IDC_SC_CLABEL + i, 14, y + 2, 72, 8, used);
-        Place(dlg, IDC_SC_COMBO + i, 90, y, 123, 100, used);
+        Place(dlg, IDC_SC_COMBO + i, 90, y, 177, 100, used);
         if (used) y += 18;
     }
     if (c.nChoices) y += 4;
@@ -69,17 +69,18 @@ static void Layout(HWND dlg, SimpleConfig& c) {
         }
         Place(dlg, IDC_SC_SLABEL + i, 14, y, 190, 8, used);
         Place(dlg, IDC_SC_LOW + i, 14, y + 14, 30, 8, used);
-        Place(dlg, IDC_SC_SLIDER + i, 46, y + 11, 140, 16, used);
-        Place(dlg, IDC_SC_HIGH + i, 190, y + 14, 28, 8, used);
+        Place(dlg, IDC_SC_SLIDER + i, 46, y + 11, 194, 16, used);
+        Place(dlg, IDC_SC_HIGH + i, 244, y + 14, 28, 8, used);
         if (used) y += 30;
     }
-    Place(dlg, IDC_SC_GROUP, 7, 7, 213, y - 4);
+    Place(dlg, IDC_SC_GROUP, 7, 7, 267, y - 4);
     int by = y + 9;
-    Place(dlg, IDC_SC_DISPLAY, 7, by, 75, 14);
-    Place(dlg, IDOK, 116, by, 50, 14);
-    Place(dlg, IDCANCEL, 170, by, 50, 14);
+    Place(dlg, IDC_SC_DISPLAY, 7, by, 72, 14);
+    Place(dlg, IDC_SC_STYLE, 83, by, 80, 14);
+    Place(dlg, IDOK, 170, by, 50, 14);
+    Place(dlg, IDCANCEL, 224, by, 50, 14);
     // Resize the dialog to fit, keeping it centred.
-    RECT rc = { 0, 0, 227, by + 21 };
+    RECT rc = { 0, 0, 281, by + 21 };
     MapDialogRect(dlg, &rc);
     AdjustWindowRectEx(&rc, GetWindowLongW(dlg, GWL_STYLE), FALSE, GetWindowLongW(dlg, GWL_EXSTYLE));
     RECT cur; GetWindowRect(dlg, &cur);
@@ -98,6 +99,7 @@ static INT_PTR CALLBACK SimpleDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_SC_DISPLAY: ShowDisplaySettings(dlg); return TRUE;
+        case IDC_SC_STYLE: ShowStyleSettings(dlg); return TRUE;
         case IDOK:
             for (int i = 0; i < c->nChoices; i++) {
                 c->choice[i] = (DWORD)SendDlgItemMessageW(dlg, IDC_SC_COMBO + i, CB_GETCURSEL, 0, 0);

@@ -23,7 +23,7 @@ all: $(SAVERS:%=$(OUT)/%.scr) $(OUT)/ScreensaverStudio.exe
 $(OUT):
 	mkdir -p $(OUT)
 
-$(OUT)/saver.o: common/saver.cpp common/theme.h common/saver.h common/render.h common/mesh.h common/common_res.h | $(OUT)
+$(OUT)/saver.o: common/saver.cpp common/theme.h common/styleui.h common/saver.h common/render.h common/mesh.h common/common_res.h | $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(OUT)/simplecfg.o: common/simplecfg.cpp common/simplecfg.h common/saver.h | $(OUT)
@@ -45,7 +45,7 @@ endef
 $(foreach s,$(SAVERS),$(eval $(call SAVER_RULES,$(s))))
 
 # Screensaver Studio (standalone browser / previewer)
-$(OUT)/studio.o: studio/studio.cpp common/theme.h studio/resource.h | $(OUT)
+$(OUT)/studio.o: studio/studio.cpp common/theme.h common/styleui.h studio/resource.h | $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(OUT)/studio_res.o: studio/studio.rc studio/resource.h studio/studio.ico studio/studio.manifest | $(OUT)

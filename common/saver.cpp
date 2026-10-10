@@ -10,6 +10,7 @@
 #include <math.h>
 #include <mmsystem.h>
 #include "theme.h"
+#include "styleui.h"
 
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
@@ -261,77 +262,10 @@ const wchar_t* SaverFileName() {
     return name;
 }
 
-static void StyleDlgShowName(HWND dlg) {
-    BOOL ok; UINT id = GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
-    wchar_t name[96]; style::ThemeName(ok ? (int)id : 0, name, 96);
-    SetDlgItemTextW(dlg, IDC_STYLE_NAME, name);
-}
-
-static void StyleDlgLoad(HWND dlg, const style::Settings& st) {
-    SetDlgItemInt(dlg, IDC_STYLE_THEME, st.theme, FALSE);
-    SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_SETCURSEL, st.pattern, 0);
-    SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_SETCURSEL, st.effect, 0);
-    SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_SETCURSEL, st.motion, 0);
-    SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETPOS, TRUE, st.speed);
-    SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETPOS, TRUE, st.strength);
-    StyleDlgShowName(dlg);
-}
-
-static style::Settings StyleDlgRead(HWND dlg) {
-    style::Settings st;
-    BOOL ok; UINT id = GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
-    st.theme = ok ? id : 0;
-    st.pattern = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_GETCURSEL, 0, 0);
-    st.effect = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_GETCURSEL, 0, 0);
-    st.motion = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_GETCURSEL, 0, 0);
-    st.speed = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_GETPOS, 0, 0);
-    st.strength = (DWORD)SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_GETPOS, 0, 0);
-    style::Clamp(st);
-    return st;
-}
-
-static INT_PTR CALLBACK StyleDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM) {
-    switch (msg) {
-    case WM_INITDIALOG: {
-        for (int i = 0; i < style::kPatternCount; i++) SendDlgItemMessageW(dlg, IDC_STYLE_PATTERN, CB_ADDSTRING, 0, (LPARAM)style::kPatternNames[i]);
-        for (int i = 0; i < style::kEffectCount; i++)  SendDlgItemMessageW(dlg, IDC_STYLE_EFFECT, CB_ADDSTRING, 0, (LPARAM)style::kEffectNames[i]);
-        for (int i = 0; i < style::kMotionCount; i++)  SendDlgItemMessageW(dlg, IDC_STYLE_MOTION, CB_ADDSTRING, 0, (LPARAM)style::kMotionNames[i]);
-        SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
-        SendDlgItemMessageW(dlg, IDC_STYLE_SPEED, TBM_SETTICFREQ, 10, 0);
-        SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
-        SendDlgItemMessageW(dlg, IDC_STYLE_STRENGTH, TBM_SETTICFREQ, 10, 0);
-        wchar_t range[64]; wsprintfW(range, L"(0 = original, 1 - %d)", style::kThemeCount);
-        SetDlgItemTextW(dlg, IDC_STYLE_RANGE, range);
-        StyleDlgLoad(dlg, style::Load(SaverFileName()));
-        return TRUE;
-    }
-    case WM_COMMAND: {
-        BOOL ok; int id = (int)GetDlgItemInt(dlg, IDC_STYLE_THEME, &ok, FALSE);
-        if (!ok) id = 0;
-        switch (LOWORD(wp)) {
-        case IDC_STYLE_THEME: if (HIWORD(wp) == EN_CHANGE) StyleDlgShowName(dlg); return TRUE;
-        case IDC_STYLE_PREV:   SetDlgItemInt(dlg, IDC_STYLE_THEME, id > 0 ? id - 1 : style::kThemeCount, FALSE); return TRUE;
-        case IDC_STYLE_NEXT:   SetDlgItemInt(dlg, IDC_STYLE_THEME, id < style::kThemeCount ? id + 1 : 0, FALSE); return TRUE;
-        case IDC_STYLE_RANDOM: SetDlgItemInt(dlg, IDC_STYLE_THEME, 1 + (GetTickCount() * 2654435761u >> 7) % style::kThemeCount, FALSE); return TRUE;
-        case IDC_STYLE_RESET:  StyleDlgLoad(dlg, style::Settings()); return TRUE;
-        case IDC_STYLE_ALL: {
-            style::Settings st = StyleDlgRead(dlg);
-            style::Save(L"_All", st);
-            style::Save(SaverFileName(), st);
-            EndDialog(dlg, IDOK);
-            return TRUE;
-        }
-        case IDOK: style::Save(SaverFileName(), StyleDlgRead(dlg)); EndDialog(dlg, IDOK); return TRUE;
-        case IDCANCEL: EndDialog(dlg, IDCANCEL); return TRUE;
-        }
-        break;
-    }
-    }
-    return FALSE;
-}
-
 void ShowStyleSettings(HWND parent) {
-    DialogBoxParamW(g_hInst, MAKEINTRESOURCEW(IDD_STYLE), parent, StyleDlgProc, 0);
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    styleui::ShowStyleDialog(parent, path, SaverFileName());
 }
 
 void ShowDisplaySettings(HWND parent) {
@@ -761,6 +695,10 @@ static int RunSaver() {
     g_showGraph = RegReadDword(L"Show Frame Graph", 0) != 0;
     g_msaa = (int)RegReadDword(L"MSAA", 4);
     g_style = style::Load(SaverFileName());
+    if (g_style.randomize) {   // a fresh random style every time the saver starts
+        style::Rng rng(style::TimeSeed());
+        g_style = style::Randomize(g_style, style::LoadPool(), rng);
+    }
     timeBeginPeriod(1);   // 1 ms timer resolution while running
 
     wchar_t title[128];

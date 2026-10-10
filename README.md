@@ -158,7 +158,22 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 * **Use as my saver** makes the selected `.scr` your Windows screen saver from where it is.
 * **Surprise me!** picks a random style. **Apply style to all** sets the current style on every saver.
 
-Every saver also has the same options under *Settings → Display Settings → Themes & Effects...*
+**Every  has the full Studio editor built in**, with its own live preview. Open it from *Settings → Themes & Effects...* (or *Display Settings → Themes & Effects...* in Pipes, Starfield and Polyhedra). Changes are saved straight away.
+
+![Themes & Effects inside a saver](docs/screenshots/themes_dialog.png)
+
+### Randomizer and favourites
+
+* Tick **Randomize the style every time it starts** and the saver picks a new theme, pattern, effect, motion and speed each time Windows starts it. **Apply style to all savers** turns this on for every saver at once.
+* Tick **Favourite** next to a theme to add it to your favourites.
+* **Randomizer & favourites...** controls what the randomizer can pick. The *Random* and *Surprise me!* buttons follow the same rules.
+  * Each palette, theme style, pattern, effect and motion has a tickbox. Untick anything you never want to see.
+  * Choose which of theme, pattern, effect, motion and speed get randomized. Anything not randomized keeps the saver's own setting.
+  * Limit themes to your favourites, and choose whether the original colours can come up.
+  * Set the slowest and fastest random speed.
+  * Manage the favourites list.
+
+![Randomizer & favourites](docs/screenshots/randomizer.png)
 
 ![Style examples](docs/screenshots/styles.png)
 *Top: Aero Aurora with its original colours, theme 5 and theme 2000 with Dreamy glow. Bottom: Nebula with its original colours, theme 4123 with Kaleidoscope 12, and theme 7000 with Polar tunnel and Bloom.*
@@ -188,7 +203,7 @@ The style options are:
 
 The renderer applies all of this on the GPU in a single full-screen pass over the finished image. That costs well under a millisecond, and nothing is added when the style is left at its defaults. Themes keep true black black, so the OLED savers still leave unused pixels off.
 
-Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
+The randomizer settings and favourites are shared by every saver and live in . Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
 
 ## Rules every saver follows (same as `sspipes.scr`)
 
@@ -227,7 +242,8 @@ Copy a `.scr` to `C:\Windows\System32`. Then choose it in **Screen saver setting
 common/           shared framework: WinMain, command line, windows, input rules,
                   per-monitor render threads, registry, Display Settings dialog, common resources
                   render.cpp: Direct3D 11 renderer (one device per monitor, on its own GPU)
-                  theme.h: themes, patterns, effects, motion, speed (shared with the Studio)
+                  theme.h: themes, patterns, effects, motion, speed, randomizer (shared with the Studio)
+                  styleui.h: the style editor, Themes & Effects window and Randomizer dialog
 studio/           Screensaver Studio (standalone browser and live previewer)
 savers/<name>/    each saver: scene + settings dialog (.cpp), resources (.rc, .ico)
 tools/            pe_inspect.py (analysis), make_icons.py (icon generator)
