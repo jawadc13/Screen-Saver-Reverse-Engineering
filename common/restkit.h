@@ -20,6 +20,7 @@
 //     OLED TVs do), so even hard edges never sit on exactly the same pixels.
 #pragma once
 #include "aerokit.h"
+#include "care.h"
 
 namespace rest {
 
@@ -30,7 +31,7 @@ namespace rest {
 #define REST_EVERY_SLIDER   { L"Rest to black every (1 - 15 minutes)", L"RestEvery", 29, L"1 min", L"15 min" }
 #define REST_LENGTH_SLIDER  { L"Rest length (5 - 60 seconds)", L"RestLength", 18, L"5 s", L"60 s" }
 
-inline float Smooth(float x) { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); }
+using care::Smooth;
 
 // Full-screen colour field computed on a coarse grid with colours blended
 // between grid points (cheap even at 175 Hz on 4K). f(x, y) gets canvas
@@ -132,73 +133,9 @@ private:
     float phaseTime = 0;
     const float kFade = 2.5f;
 
-    // Burn-in guard state, per grid cell.
-    std::vector<float> lum, mean, change, staticTime, dim;
-    int gw = 0, gh = 0;
-    float sampleTimer = 0, lastSample = 0, hotTime = 0;
+    care::BurnGuard guard;
     Canvas2D overlay;
     bool burnInTest = false;   // registry "BurnInTest" = 1: draw a static block to see the guard work
-
-    void UpdateGuard(Renderer& r, float dt) {
-        sampleTimer -= dt;
-        if (sampleTimer <= 0) { r.RequestLuminance(); sampleTimer = 0.2f; }
-        int w = 0, h = 0;
-        if (r.PollLuminance(lum, w, h)) {
-            if (w != gw || h != gh) {
-                gw = w; gh = h;
-                mean.assign(lum.begin(), lum.end()); change.assign(lum.size(), 0.015f);
-                staticTime.assign(lum.size(), 0); dim.assign(lum.size(), 0);
-                lastSample = t;
-                return;
-            }
-            float dts = fmaxf(0.05f, t - lastSample);
-            lastSample = t;
-            float k = 1 - expf(-dts / 20.0f);    // brightness: ~20 s average
-            float kc = 1 - expf(-dts / 10.0f);   // change: ~10 s average
-            for (size_t i = 0; i < lum.size(); i++) {
-                float d = fabsf(lum[i] - mean[i]);
-                mean[i] += (lum[i] - mean[i]) * k;
-                change[i] += (d - change[i]) * kc;
-                // Bright and barely changing = the kind of content that burns in.
-                bool still = mean[i] > 0.22f && change[i] < 0.012f;
-                staticTime[i] = still ? staticTime[i] + dts : fmaxf(0, staticTime[i] - 3 * dts);
-            }
-        }
-        // Dim hot regions smoothly (in ~5 s), release slowly (~10 s).
-        int hot = 0;
-        for (size_t i = 0; i < dim.size(); i++) {
-            float target = staticTime[i] > 45 ? 0.8f : 0;
-            dim[i] += (target - dim[i]) * fminf(1, dt / (target > dim[i] ? 5.0f : 10.0f));
-            hot += dim[i] > 0.4f;
-        }
-        // If a fifth of the screen has gone static for 20 s, rest early.
-        hotTime = (!dim.empty() && hot > (int)dim.size() / 5) ? hotTime + dt : 0;
-    }
-
-    void DrawGuard(Renderer& r) {
-        if (dim.empty()) return;
-        overlay.Begin(width, height);
-        // Corner values = average of the touching cells, so the dimming is
-        // a smooth gradient rather than visible blocks.
-        auto cellDim = [&](int x, int y) {
-            x = x < 0 ? 0 : x >= gw ? gw - 1 : x; y = y < 0 ? 0 : y >= gh ? gh - 1 : y;
-            return dim[(size_t)(gh - 1 - y) * gw + x];   // readback rows are top-down
-        };
-        auto corner = [&](int x, int y) { return 0.25f * (cellDim(x - 1, y - 1) + cellDim(x, y - 1) + cellDim(x - 1, y) + cellDim(x, y)); };
-        bool any = false;
-        for (float d : dim) if (d > 0.01f) { any = true; break; }
-        if (!any) return;
-        float cw = (float)width / gw, ch = (float)height / gh;
-        for (int y = 0; y < gh; y++)
-            for (int x = 0; x < gw; x++) {
-                float a = corner(x, y), b = corner(x + 1, y), c = corner(x + 1, y + 1), d = corner(x, y + 1);
-                if (a + b + c + d < 0.01f) continue;
-                float x0 = -width * 0.5f + x * cw, y0 = -height * 0.5f + y * ch;
-                PushQuad(overlay.v, overlay.P(x0, y0), overlay.P(x0 + cw, y0), overlay.P(x0 + cw, y0 + ch), overlay.P(x0, y0 + ch), Vec3(0, 0, 1),
-                         Color(0, 0, 0, a), Color(0, 0, 0, b), Color(0, 0, 0, c), Color(0, 0, 0, d));
-            }
-        overlay.Draw(r, BLEND_ALPHA);
-    }
 
     void DrawBand(Renderer& r, int band) {
         if (!band) return;
@@ -223,6 +160,7 @@ private:
     }
 
 public:
+    bool HasOwnScreenCare() const override { return true; }
     bool Init(Renderer& r, int w, int h, bool pv) override {
         width = w; height = h > 0 ? h : 1; preview = pv;
         burnInTest = RegReadDword(L"BurnInTest", 0) != 0;
@@ -239,23 +177,20 @@ public:
         phaseTime += dt;
         if (preview) { phase = SHOW; band = 0; }
         switch (phase) {
-        case SHOW:     if (!preview && (phaseTime > every || hotTime > 20)) { phase = FADE_OUT; phaseTime = 0; } break;
+        case SHOW:     if (!preview && (phaseTime > every || guard.HotTime() > 20)) { phase = FADE_OUT; phaseTime = 0; } break;
         case FADE_OUT: if (phaseTime > kFade) { phase = RESTING; phaseTime = 0; } break;
         case RESTING:
             if (phaseTime > restLen) {
                 // Come back as a new variation, with the guard's history cleared.
-                phase = FADE_IN; phaseTime = 0; variation++; hotTime = 0;
+                phase = FADE_IN; phaseTime = 0; variation++;
                 Reseed();
-                for (auto& s : staticTime) s = 0;
-                for (auto& d : dim) d = 0;
+                guard.Reset();
             }
             break;
         case FADE_IN:  if (phaseTime > kFade) { phase = SHOW; phaseTime = 0; } break;
         }
 
-        // Pixel orbit: a few pixels round a slow circle (3 px at 1080p).
-        float rad = 3.0f * (float)(width < height ? width : height) / 1080.0f;
-        r.SetPixelShift(cosf(t * 2 * kPi / 180) * rad, sinf(t * 2 * kPi / 180) * rad, 1 + 2.5f * rad / (width < height ? width : height));
+        care::Orbit(r, t, width, height);
 
         if (phase == RESTING) { r.BeginFrame(true); return; }   // every pixel fully off
         r.BeginFrame(!Persistent());
@@ -266,10 +201,10 @@ public:
             tb.Rect(-width * 0.3f, height * 0.1f, -width * 0.05f, height * 0.35f, Color(1, 1, 1));
             tb.Draw(r, BLEND_OPAQUE);
         }
-        if (!preview) UpdateGuard(r, dt);
+        if (!preview) guard.Update(r, dt);
         // Overlays go on top of the finished frame, never into a kept image.
         r.BeginOverlay();
-        DrawGuard(r);
+        guard.Draw(r, width, height);
         DrawBand(r, band);
         float fade = phase == FADE_OUT ? Smooth(phaseTime / kFade) : phase == FADE_IN ? 1 - Smooth(phaseTime / kFade) : 0;
         if (fade > 0) r.FullscreenQuad(0, 0, 0, fade);

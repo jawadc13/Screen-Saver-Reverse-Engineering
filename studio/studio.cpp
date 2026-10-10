@@ -148,7 +148,7 @@ static void SetAsScreensaver() {
 }
 
 // ---------------------------------------------------------------------------
-// Window (client 936 x 640 at 96 dpi)
+// Window (client 936 x 702 at 96 dpi)
 // ---------------------------------------------------------------------------
 static void CreateControls() {
     styleui::Ui& ui = g_ui;
@@ -157,7 +157,7 @@ static void CreateControls() {
     SendMessageW(g_filter, CB_ADDSTRING, 0, (LPARAM)L"All screensavers");
     for (auto* g : kGroupNames) SendMessageW(g_filter, CB_ADDSTRING, 0, (LPARAM)g);
     SendMessageW(g_filter, CB_SETCURSEL, 0, 0);
-    g_list = ui.Make(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT, 12, 40, 258, 588, ID_LIST, WS_EX_CLIENTEDGE);
+    g_list = ui.Make(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT, 12, 40, 258, 650, ID_LIST, WS_EX_CLIENTEDGE);
 
     HWND frame = ui.Make(L"STATIC", L"", SS_BLACKRECT, 284, 10, 640, 360, -1);
     GetWindowRect(frame, &g_previewRc);
@@ -252,7 +252,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     const DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_MAXIMIZEBOX | WS_THICKFRAME);
     HWND h = CreateWindowExW(0, L"ScreensaverStudio", L"Screensaver Studio", style,
                              CW_USEDEFAULT, CW_USEDEFAULT, 400, 300, nullptr, nullptr, inst, nullptr);
-    styleui::FitClient(h, g_ui.dpi, 936, 640);
+    styleui::FitClient(h, g_ui.dpi, 936, 702);
     ShowWindow(h, show);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {

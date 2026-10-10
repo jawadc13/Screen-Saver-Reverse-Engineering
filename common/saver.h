@@ -59,6 +59,9 @@ public:
     virtual void Resize(int width, int height) = 0;
     // Advance by `dt` seconds and draw one frame (the framework presents).
     virtual void Frame(Renderer& r, float dt) = 0;
+    // True for scenes that run their own rest cycle and burn-in guard
+    // (restkit.h); the framework's screen care then stays out of the way.
+    virtual bool HasOwnScreenCare() const { return false; }
 };
 
 const wchar_t* RegistryName();             // e.g. L"Pipes"

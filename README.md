@@ -162,6 +162,16 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 
 ![Themes & Effects inside a saver](docs/screenshots/themes_dialog.png)
 
+### OLED screen care on every saver
+
+The full-screen OLED-safe savers' screen care (see below) is available in every saver. Find it in the **OLED screen care** row of *Themes & Effects* and the Studio:
+
+* **Rest to black every** *N* minutes (Never, or 1 to 60) **for** 5 s to 2 min. The screen fades to complete black, rests, then fades back in. Rest time doesn't count as saver time.
+* **Pixel orbit** (on by default) shifts the whole image a few pixels round a slow circle.
+* **Burn-in guard** (on by default) dims any region that stays bright and unchanging for about 45 s. If a fifth of the screen stays static for 20 s, it starts a rest early, even when scheduled rests are off.
+
+The full-screen OLED-safe (`Safe_`) savers keep their own rest settings, including the rolling band, in their *Settings*. They always run the guard and the orbit.
+
 ### Randomizer and favourites
 
 * Tick **Randomize the style every time it starts** and the saver picks a new theme, pattern, effect, motion and speed each time Windows starts it. **Apply style to all savers** turns this on for every saver at once.
@@ -244,6 +254,7 @@ common/           shared framework: WinMain, command line, windows, input rules,
                   render.cpp: Direct3D 11 renderer (one device per monitor, on its own GPU)
                   theme.h: themes, patterns, effects, motion, speed, randomizer (shared with the Studio)
                   styleui.h: the style editor, Themes & Effects window and Randomizer dialog
+                  care.h: burn-in guard, pixel orbit and rest cycle (every saver)
 studio/           Screensaver Studio (standalone browser and live previewer)
 savers/<name>/    each saver: scene + settings dialog (.cpp), resources (.rc, .ico)
 tools/            pe_inspect.py (analysis), make_icons.py (icon generator)

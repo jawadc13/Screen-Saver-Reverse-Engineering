@@ -89,15 +89,15 @@ inline INT_PTR RunDialog(HWND owner, const wchar_t* title, DLGPROC proc, LPARAM 
 void ShowRandomizer(HWND owner);
 
 // ---------------------------------------------------------------------------
-// Editor panel (640 x 212 at 96 dpi)
+// Editor panel (640 x 272 at 96 dpi)
 // ---------------------------------------------------------------------------
 enum {
     E_THEME = 3000, E_NAME, E_PREV, E_NEXT, E_RANDOM, E_FAV, E_PATTERN, E_EFFECT, E_MOTION, E_SPEED, E_SPEEDL,
-    E_STRENGTH, E_STRENGTHL, E_RANDOMIZE, E_POOL, E_SURPRISE, E_RESET, E_ALL,
+    E_STRENGTH, E_STRENGTHL, E_RANDOMIZE, E_POOL, E_SURPRISE, E_RESET, E_ALL, E_REST_EVERY, E_REST_LEN, E_ORBIT, E_GUARD,
 };
 
 struct Editor {
-    static const int kWidth = 640, kHeight = 212;
+    static const int kWidth = 640, kHeight = 272;
     Ui ui;
     bool loading = false;
     Rng rng{ TimeSeed() };
@@ -134,6 +134,28 @@ struct Editor {
         ui.Make(L"BUTTON", L"Reset style", WS_TABSTOP, 122, 180, 96, 30, E_RESET);
         ui.Make(L"BUTTON", L"Apply style to all savers", WS_TABSTOP, 224, 180, 170, 30, E_ALL);
         ui.Make(L"BUTTON", L"Randomizer && favourites...", WS_TABSTOP, 400, 180, 240, 30, E_POOL);
+
+        ui.Make(L"BUTTON", L"OLED screen care  (full-screen OLED-safe savers use the rest settings in their own Settings)", BS_GROUPBOX, 0, 218, 640, 54, -1);
+        ui.Make(L"STATIC", L"Rest to black every", 0, 12, 244, 112, 18, -1);
+        HWND ev = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 124, 240, 84, 300, E_REST_EVERY);
+        ui.Make(L"STATIC", L"for", 0, 216, 244, 22, 18, -1);
+        HWND len = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 240, 240, 70, 300, E_REST_LEN);
+        for (DWORD m : kRestEveryMinutes) {
+            wchar_t b[32];
+            if (m) wsprintfW(b, L"%u min", m); else lstrcpyW(b, L"Never");
+            SendMessageW(ev, CB_ADDSTRING, 0, (LPARAM)b);
+        }
+        for (DWORD sec : kRestLengthSeconds) { wchar_t b[32]; wsprintfW(b, L"%u s", sec); SendMessageW(len, CB_ADDSTRING, 0, (LPARAM)b); }
+        ui.Make(L"BUTTON", L"Pixel orbit", BS_AUTOCHECKBOX | WS_TABSTOP, 330, 242, 100, 20, E_ORBIT);
+        ui.Make(L"BUTTON", L"Burn-in guard (dims static areas)", BS_AUTOCHECKBOX | WS_TABSTOP, 434, 242, 200, 20, E_GUARD);
+    }
+
+    // Index of the closest choice in a list.
+    template <size_t N>
+    static int Closest(const DWORD (&list)[N], DWORD v) {
+        int best = 0;
+        for (size_t i = 0; i < N; i++) if ((list[i] > v ? list[i] - v : v - list[i]) < (list[best] > v ? list[best] - v : v - list[best])) best = (int)i;
+        return best;
     }
 
     int Theme() const {
@@ -166,6 +188,10 @@ struct Editor {
         SendMessageW(ui.I(E_SPEED), TBM_SETPOS, TRUE, s.speed);
         SendMessageW(ui.I(E_STRENGTH), TBM_SETPOS, TRUE, s.strength);
         CheckDlgButton(ui.w, E_RANDOMIZE, s.randomize ? BST_CHECKED : BST_UNCHECKED);
+        SendMessageW(ui.I(E_REST_EVERY), CB_SETCURSEL, Closest(kRestEveryMinutes, s.restEvery), 0);
+        SendMessageW(ui.I(E_REST_LEN), CB_SETCURSEL, Closest(kRestLengthSeconds, s.restLength), 0);
+        CheckDlgButton(ui.w, E_ORBIT, s.orbit ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(ui.w, E_GUARD, s.guard ? BST_CHECKED : BST_UNCHECKED);
         Refresh();
         loading = false;
     }
@@ -179,6 +205,11 @@ struct Editor {
         s.speed = (DWORD)SendMessageW(ui.I(E_SPEED), TBM_GETPOS, 0, 0);
         s.strength = (DWORD)SendMessageW(ui.I(E_STRENGTH), TBM_GETPOS, 0, 0);
         s.randomize = IsDlgButtonChecked(ui.w, E_RANDOMIZE) == BST_CHECKED;
+        int ev = (int)SendMessageW(ui.I(E_REST_EVERY), CB_GETCURSEL, 0, 0), len = (int)SendMessageW(ui.I(E_REST_LEN), CB_GETCURSEL, 0, 0);
+        if (ev >= 0 && ev < (int)(sizeof(kRestEveryMinutes) / sizeof(DWORD))) s.restEvery = kRestEveryMinutes[ev];
+        if (len >= 0 && len < (int)(sizeof(kRestLengthSeconds) / sizeof(DWORD))) s.restLength = kRestLengthSeconds[len];
+        s.orbit = IsDlgButtonChecked(ui.w, E_ORBIT) == BST_CHECKED;
+        s.guard = IsDlgButtonChecked(ui.w, E_GUARD) == BST_CHECKED;
         Clamp(s);
         return s;
     }
@@ -193,8 +224,8 @@ struct Editor {
         case E_NEXT:   SetDlgItemInt(ui.w, E_THEME, theme < kThemeCount ? theme + 1 : 0, FALSE); return false;
         case E_RANDOM: SetDlgItemInt(ui.w, E_THEME, RandomTheme(LoadPool(), rng), FALSE); return false;
         case E_FAV:    SetFavourite(theme, IsDlgButtonChecked(ui.w, E_FAV) == BST_CHECKED); return false;
-        case E_PATTERN: case E_EFFECT: case E_MOTION: return code == CBN_SELCHANGE;
-        case E_RANDOMIZE: return true;
+        case E_PATTERN: case E_EFFECT: case E_MOTION: case E_REST_EVERY: case E_REST_LEN: return code == CBN_SELCHANGE;
+        case E_RANDOMIZE: case E_ORBIT: case E_GUARD: return true;
         case E_POOL:   ShowRandomizer(GetAncestor(ui.w, GA_ROOT)); Refresh(); return false;
         case E_SURPRISE: {
             RandomPool pool = LoadPool();
@@ -202,7 +233,12 @@ struct Editor {
             Load(Randomize(Read(), pool, rng));
             return true;
         }
-        case E_RESET:  Load(Settings()); return true;
+        case E_RESET: {   // style back to defaults; screen care is kept
+            Settings cur = Read(), d;
+            d.restEvery = cur.restEvery; d.restLength = cur.restLength; d.orbit = cur.orbit; d.guard = cur.guard;
+            Load(d);
+            return true;
+        }
         case E_ALL:
             SaveToAll(Read());
             MessageBoxW(GetAncestor(ui.w, GA_ROOT), L"This style (including the randomize setting) is now used by every screensaver.",
@@ -515,9 +551,9 @@ inline INT_PTR CALLBACK StyleDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         MapWindowPoints(nullptr, dlg, (POINT*)&s->previewRc, 2);
         s->ed.Create(dlg, 12, 294, ui.dpi, ui.font, ui.bold);
         s->ed.Load(Load(s->file.c_str()));
-        ui.Make(L"STATIC", L"Changes are saved straight away; the preview restarts to show them.", 0, 12, 526, 440, 18, -1);
-        ui.Make(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 562, 520, 90, 28, IDOK);
-        FitClient(dlg, ui.dpi, 664, 560);
+        ui.Make(L"STATIC", L"Changes are saved straight away; the preview restarts to show them.", 0, 12, 586, 440, 18, -1);
+        ui.Make(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, 562, 580, 90, 28, IDOK);
+        FitClient(dlg, ui.dpi, 664, 620);
         s->preview.Start(dlg, s->previewRc, s->path.c_str());
         return TRUE;
     }

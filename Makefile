@@ -23,7 +23,7 @@ all: $(SAVERS:%=$(OUT)/%.scr) $(OUT)/ScreensaverStudio.exe
 $(OUT):
 	mkdir -p $(OUT)
 
-$(OUT)/saver.o: common/saver.cpp common/theme.h common/styleui.h common/saver.h common/render.h common/mesh.h common/common_res.h | $(OUT)
+$(OUT)/saver.o: common/saver.cpp common/theme.h common/styleui.h common/care.h common/scenekit.h common/saver.h common/render.h common/mesh.h common/common_res.h | $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(OUT)/simplecfg.o: common/simplecfg.cpp common/simplecfg.h common/saver.h | $(OUT)
@@ -33,7 +33,7 @@ $(OUT)/render.o: common/render.cpp common/render.h common/mesh.h | $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 define SAVER_RULES
-$(OUT)/$(1).o: savers/$(1)/$(1).cpp common/saver.h common/render.h common/mesh.h common/scenekit.h common/aerokit.h common/oledkit.h common/restkit.h savers/$(1)/resource.h | $(OUT)
+$(OUT)/$(1).o: savers/$(1)/$(1).cpp common/saver.h common/render.h common/mesh.h common/scenekit.h common/aerokit.h common/oledkit.h common/restkit.h common/care.h savers/$(1)/resource.h | $(OUT)
 	$$(CXX) $$(CXXFLAGS) -c $$< -o $$@
 
 $(OUT)/$(1)_res.o: savers/$(1)/$(1).rc savers/$(1)/resource.h savers/$(1)/$(1).ico common/common.rc common/saver.manifest | $(OUT)

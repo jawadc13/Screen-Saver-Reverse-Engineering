@@ -11,6 +11,7 @@
 #include <mmsystem.h>
 #include "theme.h"
 #include "styleui.h"
+#include "care.h"
 
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
@@ -623,6 +624,9 @@ static DWORD WINAPI RenderThread(LPVOID param) {
         int histHead = 0;
         double last = Now();
         double styleTime = 0;
+        care::Care screenCare;   // OLED rest cycle, pixel orbit, burn-in guard
+        const bool ownCare = w->scene->HasOwnScreenCare();
+        const bool preview = g_mode == SM_PREVIEW;
         while (!g_quitting) {
             int nw = w->newW, nh = w->newH;
             if (nw > 0 && nh > 0 && (nw != w->width || nh != w->height)) {
@@ -647,11 +651,17 @@ static DWORD WINAPI RenderThread(LPVOID param) {
             // Style: speed and motion scale the scene's clock; the theme,
             // pattern and effect are applied by the renderer's post pass.
             styleTime += dt;
+            const float realDt = (float)dt;
             dt *= style::SpeedMultiplier(g_style.speed) * style::MotionFactor(g_style.motion, (float)styleTime);
             if (dt > 0.25) dt = 0.25;
             r->SetPost(MakePost(g_style, (float)styleTime));
             if (w->width > 0 && w->height > 0) {
-                w->scene->Frame(*r, (float)dt);
+                bool draw = ownCare || screenCare.Before(*r, realDt, w->width, w->height, g_style.restEvery * 60.0f,
+                                                         (float)g_style.restLength, g_style.orbit != 0, g_style.guard != 0, preview);
+                if (draw) {
+                    w->scene->Frame(*r, (float)dt);
+                    if (!ownCare) screenCare.After(*r, realDt, w->width, w->height, g_style.guard != 0, preview);
+                }
                 if (g_showGraph && g_mode != SM_PREVIEW) DrawFrameGraph(*r, hist, kGraph, histHead, period);
                 r->Present();
             }
