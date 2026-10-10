@@ -31,11 +31,11 @@ inline Texture* MakeTexture(Renderer& r, int size, F f) {
 
 // Soft round glow: bright centre fading smoothly to nothing.
 inline unsigned SoftDotPx(float x, float y);
-inline Texture* SoftDot(Renderer& r) { return MakeTexture(r, 128, SoftDotPx); }
+inline Texture* SoftDot(Renderer& r) { return MakeTexture(r, 256, SoftDotPx); }
 
 // Out-of-focus "bokeh" disc: flat fill, slightly brighter rim, soft edge.
 inline Texture* Bokeh(Renderer& r) {
-    return MakeTexture(r, 128, [](float x, float y) {
+    return MakeTexture(r, 512, [](float x, float y) {
         float d = sqrtf(x * x + y * y);
         float edge = 1 - Smooth(0.86f, 0.96f, d);
         float a = (0.45f + 0.45f * Smooth(0.6f, 0.9f, d)) * edge;
@@ -68,15 +68,16 @@ inline unsigned SoftDotPx(float x, float y) {
     return Pack(1, 1, 1, a * a);
 }
 
-inline Texture* OrbBody(Renderer& r) { return MakeTexture(r, 256, OrbBodyPx); }
-inline Texture* Gloss(Renderer& r) { return MakeTexture(r, 256, GlossPx); }
+inline Texture* OrbBody(Renderer& r) { return MakeTexture(r, 512, OrbBodyPx); }
+inline Texture* Gloss(Renderer& r) { return MakeTexture(r, 512, GlossPx); }
 
 // One texture holding [orb body | gloss | soft dot] side by side, so a
 // glossy object can be drawn as a unit (body, then its own highlight) in a
 // single back-to-front pass. Use OrbCell() for the u range of each cell.
 enum OrbCellId { ORB_BODY = 0, ORB_GLOSS = 1, ORB_DOT = 2 };
+static const int kOrbCell = 512;   // texels per atlas cell: crisp even on 4K
 inline Texture* OrbAtlas(Renderer& r) {
-    const int n = 256;
+    const int n = kOrbCell;
     std::vector<unsigned> px((size_t)n * 3 * n);
     for (int j = 0; j < n; j++)
         for (int i = 0; i < n * 3; i++) {
@@ -89,7 +90,7 @@ inline Texture* OrbAtlas(Renderer& r) {
 // Textured square of cell `id` from OrbAtlas, centred at (x, y), radius rad.
 inline void OrbCell(Canvas2D& c, OrbCellId id, float x, float y, float rad, const Color& col, float squashX = 1) {
     // inset by half a texel so neighbouring cells never bleed in
-    float u0 = id / 3.0f + 0.5f / 768, u1 = (id + 1) / 3.0f - 0.5f / 768;
+    float u0 = id / 3.0f + 0.5f / (3 * kOrbCell), u1 = (id + 1) / 3.0f - 0.5f / (3 * kOrbCell);
     c.Rect(x - rad * squashX, y - rad, x + rad * squashX, y + rad, col, u0, 0, u1, 1);
 }
 
@@ -104,7 +105,7 @@ inline Texture* Cloud(Renderer& r, unsigned seed) {
         float by = (rnd() * 0.7f - 0.15f) * (1 - fabsf(bx));   // dome-shaped cluster, flat bottom
         blobs.push_back({ bx, by, 0.22f + rnd() * 0.25f });
     }
-    return MakeTexture(r, 256, [&blobs](float x, float y) {
+    return MakeTexture(r, 512, [&blobs](float x, float y) {
         float a = 0, shade = 0;
         for (const Blob& b : blobs) {
             float d = sqrtf((x - b.x) * (x - b.x) + (y - b.y) * (y - b.y)) / b.r;

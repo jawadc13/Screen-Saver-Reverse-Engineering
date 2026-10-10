@@ -126,3 +126,7 @@ A pipe arrives at cell centre **P** moving along **din** and leaves along **dout
   * Manual pacing, used only without a frame-latency waitable object, waits on a high-resolution waitable timer instead of `Sleep()`.
 * **Pipes never redraws old pipes.** Like the original, it keeps the image and depth buffer between frames and draws only newly grown pieces. A frame costs the same at the end of a round as at the start.
 * **Frame-time graph:** turn on *Display Settings → Show frame-time graph* to show a graph in the bottom-left corner. It has one bar per frame and a white line at one refresh. Red bars mark missed refreshes.
+* **Resolution and anti-aliasing:**
+  * The manifest declares per-monitor-v2 DPI awareness, and the saver also calls `SetProcessDpiAwarenessContext`. Without this, Windows renders any monitor whose scaling differs from the primary's at a lower resolution and stretches it.
+  * Scenes render into an MSAA target (4x by default; Off/2x/4x/8x in Display Settings, capped at what the GPU supports). It is resolved into the flip-model back buffer at present.
+  * The same target keeps its contents between frames for trail effects, replacing the earlier separate copy.

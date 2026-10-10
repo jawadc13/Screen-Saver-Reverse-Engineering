@@ -61,6 +61,10 @@ struct DrawParams {
 class Renderer {
 public:
     ~Renderer();
+    // Anti-aliasing: MSAA sample count to use (1 = off); call before Create.
+    // The highest supported count up to this is chosen.
+    void SetMultisample(int count) { wantedSamples = count < 1 ? 1 : count; }
+    int  Multisample() const { return samples; }
     bool Create(HWND hwnd, HMONITOR monitor, int width, int height);
     void Resize(int width, int height);
     int  Width() const { return width; }
@@ -103,6 +107,7 @@ public:
 
 private:
     void ApplyState(const DrawParams& p);
+    void ResolveToBackBuffer();
     void CreateTargets();
     void ReleaseTargets();
 
@@ -110,6 +115,7 @@ private:
     int  width = 0, height = 0;
     double refreshPeriod = 1.0 / 60;
     bool persistent = false;
+    int  wantedSamples = 4, samples = 1;
     bool overlayActive = false;
     unsigned swapFlags = 0;
     HANDLE frameWait = nullptr;

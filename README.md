@@ -62,6 +62,11 @@ Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flow
 
 ![](docs/screenshots/portrait.png)
 
+**Image quality:**
+* The savers are per-monitor DPI aware, so every monitor renders at its native resolution whatever its Windows scaling.
+* They draw with 4x multisample anti-aliasing by default. Choose Off, 2x, 4x or 8x under *Display Settings → Anti-aliasing*.
+* Generated textures (orbs, bokeh, clouds, glyphs) are 512 px (glyphs 128 px), so they stay crisp at 4K.
+
 Every saver has a **Display Settings...** button. It lets you pick, per monitor, whether to show the saver or nothing, and whether every monitor shows the same animation. It also has an optional frame-time graph.
 
 ## Rules every saver follows (same as `sspipes.scr`)

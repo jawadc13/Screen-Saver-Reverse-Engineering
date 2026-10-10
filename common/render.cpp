@@ -5,6 +5,7 @@
 #include <d3dcompiler.h>
 
 template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
+static int SupportedSamples(ID3D11Device* dev, int wanted);
 
 // HLSL. Lighting is computed per pixel in view space: two directional
 // lights + ambient, Blinn-Phong specular (the look of the fixed-function
@@ -251,8 +252,9 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     smp.MaxLOD = D3D11_FLOAT32_MAX;
     dev->CreateSamplerState(&smp, &sampler);
 
+    samples = SupportedSamples(dev, wantedSamples);
     CreateTargets();
-    return backRtv && dsv;
+    return backRtv && dsv && persistRtv;
 }
 
 void Renderer::CreateTargets() {
@@ -267,11 +269,13 @@ void Renderer::CreateTargets() {
     td.MipLevels = 1;
     td.ArraySize = 1;
     td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    td.SampleDesc.Count = 1;
+    td.SampleDesc.Count = samples;
     td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     if (SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &depthTex)))
         dev->CreateDepthStencilView(depthTex, nullptr, &dsv);
-    // Offscreen copy of the frame for persistent (trails) rendering.
+    // The scene is drawn into this multisampled (anti-aliased) target and
+    // resolved into the swap chain's back buffer at Present. It also keeps
+    // its contents between frames, which persistent (trail) scenes rely on.
     td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     td.BindFlags = D3D11_BIND_RENDER_TARGET;
     if (SUCCEEDED(dev->CreateTexture2D(&td, nullptr, &persistTex))) {
@@ -279,6 +283,17 @@ void Renderer::CreateTargets() {
         float black[4] = { 0, 0, 0, 1 };
         if (persistRtv) ctx->ClearRenderTargetView(persistRtv, black);
     }
+}
+
+// Highest supported MSAA sample count <= wanted, for both color and depth.
+static int SupportedSamples(ID3D11Device* dev, int wanted) {
+    for (int n = wanted; n > 1; n /= 2) {
+        UINT qc = 0, qd = 0;
+        dev->CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, n, &qc);
+        dev->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT, n, &qd);
+        if (qc > 0 && qd > 0) return n;
+    }
+    return 1;
 }
 
 void Renderer::ReleaseTargets() {
@@ -301,7 +316,7 @@ void Renderer::WaitForFrame() {
 
 void Renderer::BeginFrame(bool clearColor, bool clearDepth) {
     overlayActive = false;
-    ID3D11RenderTargetView* rtv = persistent ? persistRtv : backRtv;
+    ID3D11RenderTargetView* rtv = persistRtv;
     ctx->OMSetRenderTargets(1, &rtv, dsv);
     D3D11_VIEWPORT vp = { 0, 0, (float)width, (float)height, 0, 1 };
     ctx->RSSetViewports(1, &vp);
@@ -406,13 +421,19 @@ void Renderer::Draw(GpuMesh& gm, size_t first, size_t count, const DrawParams& p
     ctx->Draw((UINT)count, (UINT)first);
 }
 
-void Renderer::BeginOverlay() {
-    if (!persistent || overlayActive || !persistTex) return;
+// Copies (or, with MSAA, resolves) the scene into the swap chain's buffer.
+void Renderer::ResolveToBackBuffer() {
     ID3D11Texture2D* back = nullptr;
     if (SUCCEEDED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
-        ctx->CopyResource(back, persistTex);
+        if (samples > 1) ctx->ResolveSubresource(back, 0, persistTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
+        else             ctx->CopyResource(back, persistTex);
         back->Release();
     }
+}
+
+void Renderer::BeginOverlay() {
+    if (overlayActive || !persistTex) return;
+    ResolveToBackBuffer();
     ctx->OMSetRenderTargets(1, &backRtv, nullptr);
     overlayActive = true;
 }
@@ -442,13 +463,7 @@ void Renderer::FullscreenQuad(float r, float g, float b, float a, BlendMode mode
 }
 
 void Renderer::Present() {
-    if (persistent && persistTex && !overlayActive) {
-        ID3D11Texture2D* back = nullptr;
-        if (SUCCEEDED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
-            ctx->CopyResource(back, persistTex);
-            back->Release();
-        }
-    }
+    if (!overlayActive) ResolveToBackBuffer();
     // Sync interval 1: wait for the vertical blank of *this* monitor.
     HRESULT hr = swap->Present(1, 0);
     if (hr == DXGI_STATUS_OCCLUDED) Sleep(50);   // e.g. screen locked / display off

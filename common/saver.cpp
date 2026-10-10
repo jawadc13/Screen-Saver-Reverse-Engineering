@@ -171,7 +171,11 @@ static void ScreenKey(wchar_t* out, int index) { wsprintfW(out, L"Screen %d", in
 // Shared "Display Settings" dialog (the original has per-adapter tabs with
 // "Display screen saver / Display nothing on this monitor").
 // ---------------------------------------------------------------------------
-struct DisplayDlgState { std::vector<MonitorInfo> mons; std::vector<DWORD> black; DWORD same; DWORD graph; int sel; };
+struct DisplayDlgState { std::vector<MonitorInfo> mons; std::vector<DWORD> black; DWORD same; DWORD graph; DWORD msaa; int sel; };
+
+// Anti-aliasing choices: combo index <-> MSAA sample count.
+static const int kMsaaCounts[4] = { 1, 2, 4, 8 };
+static const wchar_t* kMsaaNames[4] = { L"Off", L"2x", L"4x (default)", L"8x" };
 
 static void DisplayDlgShow(HWND dlg, DisplayDlgState* s) {
     int i = s->sel;
@@ -198,6 +202,10 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         CheckDlgButton(dlg, IDC_SAME_ON_ALL, s->same ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(dlg, IDC_SAME_ON_ALL), s->mons.size() > 1);
         CheckDlgButton(dlg, IDC_FRAME_GRAPH, s->graph ? BST_CHECKED : BST_UNCHECKED);
+        for (int i = 0; i < 4; i++) {
+            SendDlgItemMessageW(dlg, IDC_MSAA, CB_ADDSTRING, 0, (LPARAM)kMsaaNames[i]);
+            if ((DWORD)kMsaaCounts[i] == s->msaa) SendDlgItemMessageW(dlg, IDC_MSAA, CB_SETCURSEL, i, 0);
+        }
         DisplayDlgShow(dlg, s);
         return TRUE;
     }
@@ -215,6 +223,10 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             s->same = IsDlgButtonChecked(dlg, IDC_SAME_ON_ALL) == BST_CHECKED;
             RegWriteDword(L"AllScreensSame", s->same);
             RegWriteDword(L"Show Frame Graph", IsDlgButtonChecked(dlg, IDC_FRAME_GRAPH) == BST_CHECKED);
+            {
+                int sel = (int)SendDlgItemMessageW(dlg, IDC_MSAA, CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < 4) RegWriteDword(L"MSAA", kMsaaCounts[sel]);
+            }
             for (size_t i = 0; i < s->mons.size(); i++) {
                 wchar_t key[32]; ScreenKey(key, (int)i);
                 RegWriteDword(L"Leave Black", s->black[i], key);
@@ -237,6 +249,7 @@ void ShowDisplaySettings(HWND parent) {
     s.sel = 0;
     s.same = RegReadDword(L"AllScreensSame", 0);
     s.graph = RegReadDword(L"Show Frame Graph", 0);
+    s.msaa = RegReadDword(L"MSAA", 4);
     for (size_t i = 0; i < s.mons.size(); i++) {
         wchar_t key[32]; ScreenKey(key, (int)i);
         s.black.push_back(RegReadDword(L"Leave Black", 0, key));
@@ -498,6 +511,7 @@ static void JoinMmcss() {
 }
 
 static bool g_showGraph;
+static int  g_msaa = 4;   // anti-aliasing sample count (Display Settings)
 
 // Diagnostics overlay: one bar per recent frame, height = time since the
 // previous frame. The white line is one refresh; green bars are on time,
@@ -549,6 +563,7 @@ static DWORD WINAPI RenderThread(LPVOID param) {
     RECT rc; GetClientRect(w->hwnd, &rc);
     w->width = rc.right; w->height = rc.bottom;
     Renderer* r = new Renderer;
+    r->SetMultisample(g_msaa);
     if (!r->Create(w->hwnd, w->monitor, w->width, w->height)) {
         delete r;
         InterlockedExchange(&w->failed, 1);
@@ -633,6 +648,7 @@ static int RunSaver() {
     if (!seed) seed = 1;
     bool same = RegReadDword(L"AllScreensSame", 0) != 0;
     g_showGraph = RegReadDword(L"Show Frame Graph", 0) != 0;
+    g_msaa = (int)RegReadDword(L"MSAA", 4);
     timeBeginPeriod(1);   // 1 ms timer resolution while running
 
     wchar_t title[128];
@@ -749,6 +765,11 @@ static SaverMode ParseCommandLine(HWND* parent) {
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     g_hInst = hInst;
+    // Per-monitor DPI awareness (also declared in the manifest): render every
+    // monitor at its true native resolution, whatever its scaling setting.
+    typedef BOOL (WINAPI *SETDPICTX)(HANDLE);
+    if (auto setCtx = (SETDPICTX)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext"))
+        setCtx((HANDLE)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */);
     OSVERSIONINFOW ov = {}; ov.dwOSVersionInfoSize = sizeof(ov);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

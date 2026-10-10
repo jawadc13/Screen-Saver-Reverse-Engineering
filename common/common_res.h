@@ -13,6 +13,7 @@
 #define IDC_LEAVE_BLACK            1103
 #define IDC_SAME_ON_ALL            1104
 #define IDC_FRAME_GRAPH            1105
+#define IDC_MSAA                   1106
 
 #define IDD_SIMPLE_CONFIG          300   // generic settings dialog (simplecfg.cpp)
 

@@ -22,7 +22,7 @@ const wchar_t* RegistryName() { return L"Matrix"; }
 void LoadSettings() { SimpleLoad(g_cfg); }
 void ShowConfigDialog(HWND parent) { SimpleShowDialog(parent, g_cfg); }
 
-static const int kAtlasCols = 16, kAtlasRows = 8, kCell = 64;
+static const int kAtlasCols = 16, kAtlasRows = 8, kCell = 128;   // 128 px glyphs: sharp on 4K
 
 // True if `font` really has a glyph for `ch` (no fallback box).
 static bool FontHasGlyph(HDC dc, HFONT font, wchar_t ch) {
