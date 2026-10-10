@@ -68,6 +68,7 @@ cbuffer P : register(b0) {
     float4 grade;   // hue (radians), saturation, contrast, brightness
     float4 info;    // mode (-1 = none), strength, pattern, effect
     float4 tr;      // time, width, height, aspect
+    float4 orbit;   // xy = whole-image offset (NDC), z = scale (pixel orbit)
 };
 Texture2D src : register(t0);
 SamplerState ls : register(s0);
@@ -159,7 +160,10 @@ float2 Pattern(float2 uv) {
     return uv;
 }
 float4 PPS(V i) : SV_Target {
-    float2 uv = Pattern(i.uv);
+    // Pixel orbit: the finished image moves as one piece, so scenes that
+    // keep earlier frames (Pipes) never come apart.
+    float2 n = (float2(i.uv.x * 2 - 1, 1 - i.uv.y * 2) - orbit.xy) / orbit.z;
+    float2 uv = Pattern(float2(n.x * 0.5 + 0.5, 0.5 - n.y * 0.5));
     int fx = (int)info.w;
     float t = tr.x;
     float2 px = 1 / tr.yz;
@@ -191,7 +195,7 @@ float4 PPS(V i) : SV_Target {
 }
 )";
 
-struct PostConstants { float stops[5][4]; float grade[4]; float info[4]; float tr[4]; };
+struct PostConstants { float stops[5][4]; float grade[4]; float info[4]; float tr[4]; float orbit[4]; };
 
 struct Constants {
     float worldView[16];
@@ -516,7 +520,7 @@ void Renderer::ApplyState(const DrawParams& p) {
     c.flags[2] = p.vertexColor ? 1.0f : 0.0f;
     c.flags[3] = p.rim;
     c.fog[0] = p.fogColor[0]; c.fog[1] = p.fogColor[1]; c.fog[2] = p.fogColor[2]; c.fog[3] = p.fogDensity;
-    c.shift[0] = shiftX; c.shift[1] = shiftY; c.shift[2] = shiftScale; c.shift[3] = 0;
+    c.shift[0] = 0; c.shift[1] = 0; c.shift[2] = 1; c.shift[3] = 0;   // orbit is applied in the post pass
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         memcpy(m.pData, &c, sizeof(c));
@@ -598,7 +602,8 @@ void Renderer::ResolveToBackBuffer() {
 
 // Scene -> screen, through the style post pass when a style is set.
 void Renderer::FinishScene() {
-    if (!post.Active() || !postVs || !postPs || !postCb || !postSampler) { ResolveToBackBuffer(); return; }
+    bool orbiting = shiftX != 0 || shiftY != 0 || shiftScale != 1;
+    if ((!post.Active() && !orbiting) || !postVs || !postPs || !postCb || !postSampler) { ResolveToBackBuffer(); return; }
     if (!postTex) {
         D3D11_TEXTURE2D_DESC td = {};
         td.Width = width; td.Height = height;
@@ -619,6 +624,7 @@ void Renderer::FinishScene() {
     for (int k = 0; k < 5; k++) { c.stops[k][0] = post.stops[k][0]; c.stops[k][1] = post.stops[k][1]; c.stops[k][2] = post.stops[k][2]; }
     c.grade[0] = post.hue; c.grade[1] = post.saturation; c.grade[2] = post.contrast; c.grade[3] = post.brightness;
     c.info[0] = (float)post.mode; c.info[1] = post.strength; c.info[2] = (float)post.pattern; c.info[3] = (float)post.effect;
+    c.orbit[0] = shiftX; c.orbit[1] = shiftY; c.orbit[2] = shiftScale;
     c.tr[0] = post.time; c.tr[1] = (float)width; c.tr[2] = (float)height; c.tr[3] = (float)width / height;
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(ctx->Map(postCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) { memcpy(m.pData, &c, sizeof(c)); ctx->Unmap(postCb, 0); }
@@ -705,9 +711,12 @@ Texture* Renderer::CreateTexture(const unsigned* bgra, int w, int h) {
 // Pixel orbit and luminance snapshots (OLED burn-in guard, see restkit.h)
 // ---------------------------------------------------------------------------
 void Renderer::SetPixelShift(float dxPixels, float dyPixels, float scale) {
-    shiftX = 2 * dxPixels / width;
-    shiftY = 2 * dyPixels / height;
-    shiftScale = scale;
+    // Whole pixels only: the post pass then copies pixels exactly instead of
+    // resampling (which would soften the whole image). Edges are mirrored.
+    shiftX = 2 * floorf(dxPixels + 0.5f) / width;
+    shiftY = 2 * floorf(dyPixels + 0.5f) / height;
+    shiftScale = 1;
+    (void)scale;
 }
 
 void Renderer::CreateLumTargets() {

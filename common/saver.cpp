@@ -577,6 +577,8 @@ static void DrawFrameGraph(Renderer& r, const float* hist, int count, int head, 
 // created on the GPU that drives that monitor - its own clock and its own
 // vsync, so a 175 Hz and a 60 Hz monitor on different GPUs never wait on
 // each other or copy frames between GPUs.
+float ScreenCareFadeSeconds() { return (float)g_style.fade; }
+
 static PostParams MakePost(const style::Settings& st, float time) {
     PostParams p;
     style::ThemeParams tp = style::GetTheme((int)st.theme);
@@ -657,7 +659,7 @@ static DWORD WINAPI RenderThread(LPVOID param) {
             r->SetPost(MakePost(g_style, (float)styleTime));
             if (w->width > 0 && w->height > 0) {
                 bool draw = ownCare || screenCare.Before(*r, realDt, w->width, w->height, g_style.restEvery * 60.0f,
-                                                         (float)g_style.restLength, g_style.orbit != 0, g_style.guard != 0, preview);
+                                                         (float)g_style.restLength, (float)g_style.fade, g_style.orbit != 0, g_style.guard != 0, preview);
                 if (draw) {
                     w->scene->Frame(*r, (float)dt);
                     if (!ownCare) screenCare.After(*r, realDt, w->width, w->height, g_style.guard != 0, preview);

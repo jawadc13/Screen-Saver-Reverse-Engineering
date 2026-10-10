@@ -131,7 +131,7 @@ private:
     enum Phase { SHOW, FADE_OUT, RESTING, FADE_IN };
     Phase phase = FADE_IN;
     float phaseTime = 0;
-    const float kFade = 2.5f;
+    float kFade = 5;   // seconds; the style's fade setting (Themes & Effects)
 
     care::BurnGuard guard;
     Canvas2D overlay;
@@ -174,6 +174,7 @@ public:
     void Frame(Renderer& r, float dt) override {
         float every, restLen; int band;
         RestSettings(every, restLen, band);
+        kFade = ScreenCareFadeSeconds();
         phaseTime += dt;
         if (preview) { phase = SHOW; band = 0; }
         switch (phase) {

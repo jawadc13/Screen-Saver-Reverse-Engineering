@@ -164,6 +164,7 @@ struct Settings {
     DWORD restLength = 10;// seconds of black
     DWORD orbit = 1;      // pixel orbit
     DWORD guard = 1;      // burn-in guard (dim static bright areas)
+    DWORD fade = 5;       // seconds to fade to black (and back) around a rest
 };
 
 // 0 = 0.1x, 50 = 1x, 100 = 4x (log scale on each side).
@@ -184,7 +185,7 @@ inline bool ReadKey(const wchar_t* path, Settings& s) {
     rd(L"Randomize", legacy);
     if (legacy == 1) s.shuffle = 31;
     rd(L"Shuffle", s.shuffle);
-    rd(L"RestEvery", s.restEvery); rd(L"RestLength", s.restLength); rd(L"PixelOrbit", s.orbit); rd(L"BurnInGuard", s.guard);
+    rd(L"RestEvery", s.restEvery); rd(L"RestLength", s.restLength); rd(L"PixelOrbit", s.orbit); rd(L"BurnInGuard", s.guard); rd(L"FadeSeconds", s.fade);
     RegCloseKey(k);
     return true;
 }
@@ -201,6 +202,7 @@ inline void Clamp(Settings& s) {
     if (s.restLength < 3 || s.restLength > 600) s.restLength = 10;
     if (s.orbit > 1) s.orbit = 1;
     if (s.guard > 1) s.guard = 1;
+    if (s.fade < 1 || s.fade > 30) s.fade = 5;
 }
 
 // saverFile: e.g. L"OLED_Lorenz" (the .scr name without extension).
@@ -228,13 +230,14 @@ inline void Save(const wchar_t* saverFile, const Settings& s) {
     wr(L"Motion", s.motion); wr(L"Speed", s.speed); wr(L"Strength", s.strength);
     wr(L"Shuffle", s.shuffle);
     RegDeleteValueW(k, L"Randomize");
-    wr(L"RestEvery", s.restEvery); wr(L"RestLength", s.restLength); wr(L"PixelOrbit", s.orbit); wr(L"BurnInGuard", s.guard);
+    wr(L"RestEvery", s.restEvery); wr(L"RestLength", s.restLength); wr(L"PixelOrbit", s.orbit); wr(L"BurnInGuard", s.guard); wr(L"FadeSeconds", s.fade);
     RegCloseKey(k);
 }
 
 // Choices offered for the rest cycle.
 static const DWORD kRestEveryMinutes[] = { 0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60 };
 static const DWORD kRestLengthSeconds[] = { 5, 10, 15, 20, 30, 45, 60, 120 };
+static const DWORD kFadeSeconds[] = { 1, 2, 3, 5, 10 };
 
 // Time multiplier for a motion style at time t (seconds).
 inline float MotionFactor(DWORD motion, float t) {

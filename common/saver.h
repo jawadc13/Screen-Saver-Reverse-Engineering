@@ -41,7 +41,8 @@ bool  LoadImageFile(const wchar_t* path, std::vector<unsigned>& bgra, int& w, in
 // Shows the shared "Display Settings" dialog (per-monitor options).
 void  ShowDisplaySettings(HWND parent);
 void  ShowStyleSettings(HWND parent);     // Themes & Effects (theme.h)
-const wchar_t* SaverFileName();           // this .scr's name without extension
+const wchar_t* SaverFileName();
+float ScreenCareFadeSeconds();             // fade to/from black around a rest (style setting)           // this .scr's name without extension
 // Shows a string-table message box with the saver's name as caption.
 void  ErrorBox(HWND parent, UINT stringId);
 

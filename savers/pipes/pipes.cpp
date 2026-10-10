@@ -239,13 +239,17 @@ class PipesScene : public Scene {
 
     // Flat end cap on a growing tip, so the open tube isn't seen from inside.
     // Once the pipe grows on, the disc is sealed inside it and never shows.
+    // It is slightly narrower than the tube: the kept image holds a cap from
+    // every frame of growth, and a full-width rim would tie in depth with
+    // the finished tube and leave faint rings along straight runs.
     void AddCap(const Vec3& c, const Vec3& axis, const unsigned char* rgba) {
+        const float capR = kPipeR * 0.94f;
         Vec3 u = Perpendicular(axis), v = Cross(axis, u);
         for (int i = 0; i < slices; i++) {
             float a0 = 2 * kPi * i / slices, a1 = 2 * kPi * (i + 1) / slices;
             out->Add(c, axis, 0.5f, 0.5f, rgba);
-            out->Add(c + (u * cosf(a0) + v * sinf(a0)) * kPipeR, axis, 0.5f + 0.5f * cosf(a0), 0.5f + 0.5f * sinf(a0), rgba);
-            out->Add(c + (u * cosf(a1) + v * sinf(a1)) * kPipeR, axis, 0.5f + 0.5f * cosf(a1), 0.5f + 0.5f * sinf(a1), rgba);
+            out->Add(c + (u * cosf(a0) + v * sinf(a0)) * capR, axis, 0.5f + 0.5f * cosf(a0), 0.5f + 0.5f * sinf(a0), rgba);
+            out->Add(c + (u * cosf(a1) + v * sinf(a1)) * capR, axis, 0.5f + 0.5f * cosf(a1), 0.5f + 0.5f * sinf(a1), rgba);
         }
     }
 

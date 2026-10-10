@@ -105,11 +105,12 @@ struct Care {
     Phase phase = SHOW;
     float phaseTime = 0, t = 0;
     BurnGuard guard;
-    static constexpr float kFade = 2.5f;
+    float kFade = 5;   // seconds, from the style's FadeSeconds
 
     // Before the scene: returns false while resting (skip the scene; the
     // screen is black), true when the scene should draw this frame.
-    bool Before(Renderer& r, float dt, int width, int height, float everySec, float restSec, bool orbit, bool guardOn, bool preview) {
+    bool Before(Renderer& r, float dt, int width, int height, float everySec, float restSec, float fadeSec, bool orbit, bool guardOn, bool preview) {
+        kFade = fadeSec > 0.1f ? fadeSec : 0.1f;
         t += dt;
         phaseTime += dt;
         if (preview) phase = SHOW;

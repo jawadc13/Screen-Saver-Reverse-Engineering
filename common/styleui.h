@@ -273,7 +273,7 @@ inline INT_PTR CALLBACK SaveToProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
 enum {
     E_THEME = 3000, E_NAME, E_PREV, E_NEXT, E_RANDOM, E_FAV, E_PATTERN, E_EFFECT, E_MOTION, E_SPEED, E_SPEEDL,
     E_STRENGTH, E_STRENGTHL, E_POOL, E_SURPRISE, E_RESET, E_REST_EVERY, E_REST_LEN, E_ORBIT, E_GUARD,
-    E_SAVE, E_REVERT, E_SAVETO, E_STATUS, E_PRESET, E_PLOAD, E_PSAVE, E_PDEL,
+    E_SAVE, E_REVERT, E_SAVETO, E_STATUS, E_PRESET, E_PLOAD, E_PSAVE, E_PDEL, E_FADE,
     E_SHUF0,   // + RandomWhat bit index (theme, pattern, effect, motion, speed)
 };
 
@@ -337,18 +337,21 @@ struct Editor {
         ui.Make(L"BUTTON", L"Save", WS_TABSTOP, 552, 212, 88, 30, E_SAVE, 0, true);
 
         ui.Make(L"BUTTON", L"OLED screen care  (full-screen OLED-safe savers use the rest settings in their own Settings)", BS_GROUPBOX, 0, 250, 640, 54, -1);
-        ui.Make(L"STATIC", L"Rest to black every", 0, 12, 276, 112, 18, -1);
-        HWND ev = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 124, 272, 84, 300, E_REST_EVERY);
-        ui.Make(L"STATIC", L"for", 0, 216, 276, 22, 18, -1);
-        HWND len = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 240, 272, 70, 300, E_REST_LEN);
+        ui.Make(L"STATIC", L"Rest every", 0, 12, 276, 66, 18, -1);
+        HWND ev = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 78, 272, 78, 300, E_REST_EVERY);
+        ui.Make(L"STATIC", L"for", 0, 162, 276, 20, 18, -1);
+        HWND len = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 184, 272, 62, 300, E_REST_LEN);
+        ui.Make(L"STATIC", L"fade", 0, 254, 276, 28, 18, -1);
+        HWND fd = ui.Make(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 284, 272, 56, 300, E_FADE);
         for (DWORD m : kRestEveryMinutes) {
             wchar_t b[32];
             if (m) wsprintfW(b, L"%u min", m); else lstrcpyW(b, L"Never");
             SendMessageW(ev, CB_ADDSTRING, 0, (LPARAM)b);
         }
         for (DWORD sec : kRestLengthSeconds) { wchar_t b[32]; wsprintfW(b, L"%u s", sec); SendMessageW(len, CB_ADDSTRING, 0, (LPARAM)b); }
-        ui.Make(L"BUTTON", L"Pixel orbit", BS_AUTOCHECKBOX | WS_TABSTOP, 330, 274, 100, 20, E_ORBIT);
-        ui.Make(L"BUTTON", L"Burn-in guard (dims static areas)", BS_AUTOCHECKBOX | WS_TABSTOP, 434, 274, 200, 20, E_GUARD);
+        for (DWORD sec : kFadeSeconds) { wchar_t b[32]; wsprintfW(b, L"%u s", sec); SendMessageW(fd, CB_ADDSTRING, 0, (LPARAM)b); }
+        ui.Make(L"BUTTON", L"Pixel orbit", BS_AUTOCHECKBOX | WS_TABSTOP, 350, 274, 86, 20, E_ORBIT);
+        ui.Make(L"BUTTON", L"Burn-in guard", BS_AUTOCHECKBOX | WS_TABSTOP, 440, 274, 110, 20, E_GUARD);
     }
 
     // Index of the closest choice in a list.
@@ -421,6 +424,7 @@ struct Editor {
         for (int i = 0; i < 5; i++) CheckDlgButton(ui.w, E_SHUF0 + i, (s.shuffle >> i) & 1 ? BST_CHECKED : BST_UNCHECKED);
         SendMessageW(ui.I(E_REST_EVERY), CB_SETCURSEL, Closest(kRestEveryMinutes, s.restEvery), 0);
         SendMessageW(ui.I(E_REST_LEN), CB_SETCURSEL, Closest(kRestLengthSeconds, s.restLength), 0);
+        SendMessageW(ui.I(E_FADE), CB_SETCURSEL, Closest(kFadeSeconds, s.fade), 0);
         CheckDlgButton(ui.w, E_ORBIT, s.orbit ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(ui.w, E_GUARD, s.guard ? BST_CHECKED : BST_UNCHECKED);
         loading = false;
@@ -440,6 +444,8 @@ struct Editor {
         int ev = (int)SendMessageW(ui.I(E_REST_EVERY), CB_GETCURSEL, 0, 0), len = (int)SendMessageW(ui.I(E_REST_LEN), CB_GETCURSEL, 0, 0);
         if (ev >= 0 && ev < (int)(sizeof(kRestEveryMinutes) / sizeof(DWORD))) s.restEvery = kRestEveryMinutes[ev];
         if (len >= 0 && len < (int)(sizeof(kRestLengthSeconds) / sizeof(DWORD))) s.restLength = kRestLengthSeconds[len];
+        int fd = (int)SendMessageW(ui.I(E_FADE), CB_GETCURSEL, 0, 0);
+        if (fd >= 0 && fd < (int)(sizeof(kFadeSeconds) / sizeof(DWORD))) s.fade = kFadeSeconds[fd];
         s.orbit = IsDlgButtonChecked(ui.w, E_ORBIT) == BST_CHECKED;
         s.guard = IsDlgButtonChecked(ui.w, E_GUARD) == BST_CHECKED;
         Clamp(s);
@@ -498,7 +504,7 @@ struct Editor {
         case E_NEXT:   SetDlgItemInt(ui.w, E_THEME, theme < kThemeCount ? theme + 1 : 0, FALSE); return false;
         case E_RANDOM: SetDlgItemInt(ui.w, E_THEME, RandomTheme(LoadPool(), rng), FALSE); return false;
         case E_FAV:    SetFavourite(theme, IsDlgButtonChecked(ui.w, E_FAV) == BST_CHECKED); return false;
-        case E_PATTERN: case E_EFFECT: case E_MOTION: case E_REST_EVERY: case E_REST_LEN: return code == CBN_SELCHANGE && Changed();
+        case E_PATTERN: case E_EFFECT: case E_MOTION: case E_REST_EVERY: case E_REST_LEN: case E_FADE: return code == CBN_SELCHANGE && Changed();
         case E_ORBIT: case E_GUARD: return Changed();
         case E_POOL:   ShowRandomizer(root); Refresh(); return false;
         case E_SURPRISE: {
@@ -510,7 +516,7 @@ struct Editor {
         }
         case E_RESET: {   // style back to defaults; screen care is kept
             Settings cur = Read(), d;
-            d.restEvery = cur.restEvery; d.restLength = cur.restLength; d.orbit = cur.orbit; d.guard = cur.guard;
+            d.restEvery = cur.restEvery; d.restLength = cur.restLength; d.orbit = cur.orbit; d.guard = cur.guard; d.fade = cur.fade;
             Load(d);
             return Changed();
         }
@@ -533,7 +539,7 @@ struct Editor {
             std::wstring n = SelectedPreset();
             if (n.empty()) return false;
             Settings cur = Read(), p = LoadPreset(n);
-            p.restEvery = cur.restEvery; p.restLength = cur.restLength; p.orbit = cur.orbit; p.guard = cur.guard;   // screen care stays
+            p.restEvery = cur.restEvery; p.restLength = cur.restLength; p.orbit = cur.orbit; p.guard = cur.guard; p.fade = cur.fade;   // screen care stays
             Load(p);
             return Changed();
         }
