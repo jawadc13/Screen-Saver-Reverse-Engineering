@@ -103,7 +103,10 @@ public:
                 const std::vector<float>& xs = e < 0 ? p.x : p.hx[e];
                 const std::vector<float>& ys = e < 0 ? p.y : p.hy[e];
                 float hue = e < 0 ? p.hue : p.hhue[e];
-                float fade = e < 0 ? 1.0f : 0.85f * (1.0f - (float)(e + 1) / (echoes + 1));
+                // Fade by continuous age, not echo index, so the oldest echo has
+                // already faded to nothing when it is dropped (no popping).
+                float age = e < 0 ? 0 : sampleTimer + e * spacing;
+                float fade = e < 0 ? 1.0f : 0.85f * fmaxf(0, 1.0f - age / (echoes * spacing));
                 for (size_t i = 0; i < n; i++) {
                     size_t j = (i + 1) % n;
                     canvas.Line(xs[i], ys[i], xs[j], ys[j], lineW, PolyColor(hue, (int)i) * fade, PolyColor(hue, (int)j) * fade);

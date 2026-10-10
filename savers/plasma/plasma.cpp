@@ -77,8 +77,10 @@ public:
                         + sinf(sqrtf((x - cx) * (x - cx) + (y - cy) * (y - cy)) * 1.4f - t * 1.3f);
                 float k = (v + 4) / 8;                         // 0..1
                 k = k * 2 + t * 0.05f;                         // cycle the palette slowly
-                int idx = (int)((k - floorf(k)) * 255);
-                grid[(size_t)j * gx + i] = lut[idx];
+                // Blend between neighbouring palette entries: no colour steps.
+                float fi = (k - floorf(k)) * 255;
+                int i0 = (int)fi, i1 = (i0 + 1) & 255;
+                grid[(size_t)j * gx + i] = Lerp(lut[i0], lut[i1], fi - i0);
             }
         }
         verts.clear();

@@ -130,3 +130,10 @@ A pipe arrives at cell centre **P** moving along **din** and leaves along **dout
   * The manifest declares per-monitor-v2 DPI awareness, and the saver also calls `SetProcessDpiAwarenessContext`. Without this, Windows renders any monitor whose scaling differs from the primary's at a lower resolution and stretches it.
   * Scenes render into an MSAA target (4x by default; Off/2x/4x/8x in Display Settings, capped at what the GPU supports). It is resolved into the flip-model back buffer at present.
   * The same target keeps its contents between frames for trail effects, replacing the earlier separate copy.
+* **Smoothness: continuous change instead of steps.** This started with Matrix and was then applied to every saver that had a visible jump.
+  * Matrix: per-glyph brightness with exponential decay, plus cross-faded glyph changes.
+  * Pipes: each step's pieces grow out of the tip over the step interval, with a flat cap on the growing end. Joints swell in.
+  * Starfield: stars fade out just before passing the camera.
+  * Mystify: echoes fade by continuous age.
+  * Ribbons: a live tip at the exact current position, and age-based tail fade.
+  * Plasma: palette entries are interpolated.

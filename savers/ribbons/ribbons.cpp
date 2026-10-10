@@ -19,7 +19,8 @@ const wchar_t* RegistryName() { return L"Ribbons"; }
 void LoadSettings() { SimpleLoad(g_cfg); }
 void ShowConfigDialog(HWND parent) { SimpleShowDialog(parent, g_cfg); }
 
-static const int kTrail = 160;   // samples along each ribbon
+static const int kTrail = 160;      // samples along each ribbon
+static const float kSample = 0.02f; // path time between samples
 
 struct Ribbon {
     float f[6], ph[6];           // path frequencies/phases
@@ -42,6 +43,17 @@ class RibbonsScene : public Scene {
         rb.life = RandF(10, 25);
         rb.t = RandF(0, 100);
         rb.head = rb.filled = 0;
+    }
+
+    // Position and (twisting) half-width vector of the ribbon at path time st.
+    void Sample(const Ribbon& rb, float st, Vec3& pos, Vec3& side) const {
+        Vec3 d = Normalize(Path(rb, st + 0.01f) - Path(rb, st));
+        float a = st * rb.twist;
+        // A fixed reference axis keeps the ribbon from flipping.
+        Vec3 ref = Normalize(Cross(d, Vec3(0.3f, 1, 0.2f)));
+        Vec3 ref2 = Cross(d, ref);
+        pos = Path(rb, st);
+        side = (ref * cosf(a) + ref2 * sinf(a)) * halfWidth;
     }
 
     Vec3 Path(const Ribbon& rb, float t) const {
@@ -87,26 +99,34 @@ public:
             // Sample the path at a fixed rate in path-time so the ribbon's
             // shape doesn't depend on the frame rate.
             rb.sampleTimer += dt * speed;
-            while (rb.sampleTimer >= 0.02f) {
-                rb.sampleTimer -= 0.02f;
-                float st = rb.t - rb.sampleTimer;
-                Vec3 p = Path(rb, st), d = Normalize(Path(rb, st + 0.01f) - p);
-                float a = st * rb.twist;
-                // A fixed reference axis keeps the ribbon from flipping.
-                Vec3 ref = Normalize(Cross(d, Vec3(0.3f, 1, 0.2f)));
-                Vec3 ref2 = Cross(d, ref);
+            while (rb.sampleTimer >= kSample) {
+                rb.sampleTimer -= kSample;
                 rb.head = (rb.head + 1) % kTrail;
-                rb.pos[rb.head] = p;
-                rb.side[rb.head] = (ref * cosf(a) + ref2 * sinf(a)) * halfWidth;
+                Sample(rb, rb.t - rb.sampleTimer, rb.pos[rb.head], rb.side[rb.head]);
                 if (rb.filled < kTrail) rb.filled++;
             }
+            // Live tip at the exact current position, so the front of the
+            // ribbon glides instead of advancing in sample-sized jumps.
+            Vec3 tipPos, tipSide;
+            Sample(rb, rb.t, tipPos, tipSide);
+            const float frac = rb.sampleTimer / kSample;   // how far past the newest sample
             // Fade the whole ribbon in at birth and out at end of life.
             float vis = rb.life > 0 ? 1.0f : 1.0f + rb.life / 3;
             float age = 25 - rb.life;
             if (age < 2) vis *= age / 2;
+            // Brightness by continuous age along the trail (including the
+            // fraction of a sample since the last one), so the tail fades
+            // smoothly instead of shifting a notch per sample.
+            auto ageAlpha = [&](float k) { return fmaxf(0, 1.0f - (k + frac) / kTrail); };
+            if (rb.filled > 0) {
+                float a0 = 1.0f, a1 = ageAlpha(0);
+                Color c0 = RibbonColor(rb, a0) * (a0 * vis * 0.8f), c1 = RibbonColor(rb, a1) * (a1 * vis * 0.8f);
+                const Vec3& hp = rb.pos[rb.head]; const Vec3& hs = rb.side[rb.head];
+                PushQuad(verts, tipPos + tipSide, hp + hs, hp - hs, tipPos - tipSide, Vec3(0, 0, 1), c0, c1, c1, c0);
+            }
             for (int k = 0; k + 1 < rb.filled; k++) {
                 int i0 = (rb.head - k + kTrail) % kTrail, i1 = (rb.head - k - 1 + kTrail) % kTrail;
-                float a0 = 1.0f - (float)k / rb.filled, a1 = 1.0f - (float)(k + 1) / rb.filled;
+                float a0 = ageAlpha((float)k), a1 = ageAlpha((float)(k + 1));
                 Color c0 = RibbonColor(rb, a0) * (a0 * vis * 0.8f), c1 = RibbonColor(rb, a1) * (a1 * vis * 0.8f);
                 PushQuad(verts, rb.pos[i0] + rb.side[i0], rb.pos[i1] + rb.side[i1],
                          rb.pos[i1] - rb.side[i1], rb.pos[i0] - rb.side[i0], Vec3(0, 0, 1), c0, c1, c1, c0);

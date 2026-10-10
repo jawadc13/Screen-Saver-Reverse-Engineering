@@ -145,6 +145,10 @@ public:
             float x = s.x * cr - s.y * sr, y = s.x * sr + s.y * cr;
             float bright = 1.0f - (-s.z / kFar);
             bright = bright * (2 - bright);         // ease-out: visible from further away
+            // Fade out over the last few units before passing the camera, so
+            // stars glide out of view instead of winking off.
+            float nearFade = (-s.z - kNear) / 6.0f;
+            if (nearFade < 1) bright *= nearFade < 0 ? 0 : nearFade * nearFade * (3 - 2 * nearFade);
             // Head and tail positions in pixels.
             float hz = -s.z, tz = -(s.z - trail - 0.05f);
             float hx = f / aspect * x / hz / sx, hy = f * y / hz / sy;

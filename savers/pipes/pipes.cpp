@@ -153,6 +153,23 @@ class PipesScene : public Scene {
     Texture* texture = nullptr;
     GpuMesh gpu;                       // pipe geometry on the GPU, appended as it grows
     size_t drawn = 0;                  // vertices already in the kept image (0 = redraw all)
+
+    // Smooth growth: each step's geometry is recorded as pieces along each
+    // pipe's path and drawn growing out of the tip over the step interval,
+    // instead of popping in whole. Growth only ever adds surface, so the
+    // partial pieces can be drawn straight into the kept image each frame.
+    enum PieceType { PIECE_CYL, PIECE_ELBOW, PIECE_BALL };
+    struct Piece {
+        PieceType type;
+        Vec3 a, b, c;                  // cyl: a->b; elbow: P, din, dout; ball: centre a
+        unsigned char col[4];
+        float start, len, total;       // position along this pipe's path for the step
+    };
+    std::vector<Piece> pending;        // pieces growing during the current step
+    size_t pathFirst = 0;              // first piece of the pipe being stepped
+    float pathPos = 0;
+    Mesh partial;                      // this frame's partially grown pieces
+    Mesh* out = &mesh;                 // where Add* functions write
     bool textured = false;
 
     unsigned char& Cell(int x, int y, int z) { return occupied[(z * ny + y) * nx + x]; }
@@ -183,33 +200,89 @@ class PipesScene : public Scene {
         Ring(a, u, v, p0.data(), n0.data());
         Ring(b, u, v, p1.data(), n1.data());
         float vt = len / (2 * kPi * kPipeR);       // keep texels square
-        mesh.AddRingStrip(p0.data(), n0.data(), 0, p1.data(), n1.data(), vt, slices, rgba);
+        out->AddRingStrip(p0.data(), n0.data(), 0, p1.data(), n1.data(), vt, slices, rgba);
     }
 
     // Quarter torus from P - din*R to P + dout*R (see docs/ANALYSIS.md).
-    void AddElbow(const Vec3& P, const Vec3& din, const Vec3& dout, const unsigned char* rgba) {
+    void AddElbow(const Vec3& P, const Vec3& din, const Vec3& dout, const unsigned char* rgba, float frac = 1) {
         Vec3 O = P - din * kElbowR + dout * kElbowR;
         Vec3 u = Cross(din, dout);                 // normal of the bend plane
         const int steps = slices / 2 + 2;
         std::vector<Vec3> p0(slices + 1), n0(slices + 1), p1(slices + 1), n1(slices + 1);
-        float arcStep = (kPi / 2) * kElbowR / steps / (2 * kPi * kPipeR);
+        float arcStep = (kPi / 2) * frac * kElbowR / steps / (2 * kPi * kPipeR);
         for (int s = 0; s <= steps; s++) {
-            float t = (kPi / 2) * s / steps;
+            float t = (kPi / 2) * frac * s / steps;
             Vec3 c = O - dout * (kElbowR * cosf(t)) + din * (kElbowR * sinf(t));
             Vec3 tangent = dout * sinf(t) + din * cosf(t);
             Vec3 v = Cross(tangent, u);
             Ring(c, u, v, p1.data(), n1.data());
             if (s > 0)
-                mesh.AddRingStrip(p0.data(), n0.data(), (s - 1) * arcStep, p1.data(), n1.data(), s * arcStep, slices, rgba);
+                out->AddRingStrip(p0.data(), n0.data(), (s - 1) * arcStep, p1.data(), n1.data(), s * arcStep, slices, rgba);
             p0.swap(p1); n0.swap(n1);
         }
     }
 
-    void AddBall(const Vec3& c, const unsigned char* rgba) { mesh.AddSphere(c, kBallR, slices, rgba); }
+    void AddBall(const Vec3& c, const unsigned char* rgba, float scale = 1) { out->AddSphere(c, kBallR * scale, slices, rgba); }
+
+    // --- growth -----------------------------------------------------------
+    void BeginPath() { pathFirst = pending.size(); pathPos = 0; }
+    void EndPath() { for (size_t i = pathFirst; i < pending.size(); i++) pending[i].total = pathPos; }
+    void Emit(PieceType type, const Vec3& a, const Vec3& b, const Vec3& c, float len, const unsigned char* rgba) {
+        Piece pc = { type, a, b, c, {}, pathPos, len, 0 };
+        memcpy(pc.col, rgba, 4);
+        pending.push_back(pc);
+        pathPos += len;
+    }
+    void EmitCylinder(const Vec3& a, const Vec3& b, const unsigned char* rgba) { Emit(PIECE_CYL, a, b, Vec3(), Length(b - a), rgba); }
+    void EmitElbow(const Vec3& P, const Vec3& din, const Vec3& dout, const unsigned char* rgba) { Emit(PIECE_ELBOW, P, din, dout, kPi / 2 * kElbowR, rgba); }
+    void EmitBall(const Vec3& c, const unsigned char* rgba) { Emit(PIECE_BALL, c, Vec3(), Vec3(), kBallR, rgba); }
+
+    // Flat end cap on a growing tip, so the open tube isn't seen from inside.
+    // Once the pipe grows on, the disc is sealed inside it and never shows.
+    void AddCap(const Vec3& c, const Vec3& axis, const unsigned char* rgba) {
+        Vec3 u = Perpendicular(axis), v = Cross(axis, u);
+        for (int i = 0; i < slices; i++) {
+            float a0 = 2 * kPi * i / slices, a1 = 2 * kPi * (i + 1) / slices;
+            out->Add(c, axis, 0.5f, 0.5f, rgba);
+            out->Add(c + (u * cosf(a0) + v * sinf(a0)) * kPipeR, axis, 0.5f + 0.5f * cosf(a0), 0.5f + 0.5f * sinf(a0), rgba);
+            out->Add(c + (u * cosf(a1) + v * sinf(a1)) * kPipeR, axis, 0.5f + 0.5f * cosf(a1), 0.5f + 0.5f * sinf(a1), rgba);
+        }
+    }
+
+    // Builds `pc` grown to `frac` (0..1) into *out.
+    void Build(const Piece& pc, float frac) {
+        switch (pc.type) {
+        case PIECE_CYL: {
+            Vec3 tip = pc.a + (pc.b - pc.a) * frac;
+            AddCylinder(pc.a, tip, pc.col);
+            if (frac < 1) AddCap(tip, Normalize(pc.b - pc.a), pc.col);
+            break;
+        }
+        case PIECE_ELBOW: {
+            AddElbow(pc.a, pc.b, pc.c, pc.col, frac);
+            if (frac < 1) {
+                const Vec3 &P = pc.a, &din = pc.b, &dout = pc.c;
+                Vec3 O = P - din * kElbowR + dout * kElbowR;
+                float t = (kPi / 2) * frac;
+                AddCap(O - dout * (kElbowR * cosf(t)) + din * (kElbowR * sinf(t)), dout * sinf(t) + din * cosf(t), pc.col);
+            }
+            break;
+        }
+        case PIECE_BALL: AddBall(pc.a, pc.col, frac); break;
+        }
+    }
+
+    // Finishes the current step: its pieces become permanent geometry.
+    void CommitPending() {
+        out = &mesh;
+        for (const Piece& pc : pending) Build(pc, 1);
+        pending.clear();
+    }
 
     // --- simulation -----------------------------------------------------------
     void NewRound() {
         mesh.Clear();
+        pending.clear();
         gpu.Reset();
         drawn = 0;
         std::fill(occupied.begin(), occupied.end(), 0);
@@ -236,7 +309,9 @@ class PipesScene : public Scene {
             memcpy(p.color, c, 4);
             Cell(x, y, z) = 1;
             cellsFilled++;
-            AddBall(Center(x, y, z), p.color);     // start cap
+            BeginPath();
+            EmitBall(Center(x, y, z), p.color);    // start cap swells in
+            EndPath();
             pipes.push_back(p);
             return true;
         }
@@ -245,6 +320,12 @@ class PipesScene : public Scene {
     }
 
     void StepPipe(Pipe& p) {
+        BeginPath();
+        StepPipePath(p);
+        EndPath();
+    }
+
+    void StepPipePath(Pipe& p) {
         int cand[6], n = 0;
         for (int d = 0; d < 6; d++)
             if (Free(p.x + kDirs[d][0], p.y + kDirs[d][1], p.z + kDirs[d][2])) cand[n++] = d;
@@ -252,8 +333,8 @@ class PipesScene : public Scene {
         Vec3 P = Center(p.x, p.y, p.z);
         if (n == 0) {
             // Dead end: finish the incoming half segment and cap with a ball.
-            if (p.dir >= 0) AddCylinder(P - DirVec(p.dir) * 0.5f, P, p.color);
-            AddBall(P, p.color);
+            if (p.dir >= 0) EmitCylinder(P - DirVec(p.dir) * 0.5f, P, p.color);
+            EmitBall(P, p.color);
             p.alive = false;
             return;
         }
@@ -265,20 +346,20 @@ class PipesScene : public Scene {
 
         Vec3 dout = DirVec(out);
         if (p.dir < 0) {
-            AddCylinder(P, P + dout * 0.5f, p.color);
+            EmitCylinder(P, P + dout * 0.5f, p.color);
         } else if (out == p.dir) {
-            AddCylinder(P - dout * 0.5f, P + dout * 0.5f, p.color);
+            EmitCylinder(P - dout * 0.5f, P + dout * 0.5f, p.color);
         } else {
             Vec3 din = DirVec(p.dir);
             bool elbow = roundJoint == JOINT_ELBOW || (roundJoint == JOINT_MIXED && RandI(0, 1) == 0);
             if (elbow) {
-                AddCylinder(P - din * 0.5f, P - din * kElbowR, p.color);
-                AddElbow(P, din, dout, p.color);
-                AddCylinder(P + dout * kElbowR, P + dout * 0.5f, p.color);
+                EmitCylinder(P - din * 0.5f, P - din * kElbowR, p.color);
+                EmitElbow(P, din, dout, p.color);
+                EmitCylinder(P + dout * kElbowR, P + dout * 0.5f, p.color);
             } else {
-                AddCylinder(P - din * 0.5f, P, p.color);
-                AddBall(P, p.color);
-                AddCylinder(P, P + dout * 0.5f, p.color);
+                EmitCylinder(P - din * 0.5f, P, p.color);
+                EmitBall(P, p.color);
+                EmitCylinder(P, P + dout * 0.5f, p.color);
             }
         }
         p.x += kDirs[out][0]; p.y += kDirs[out][1]; p.z += kDirs[out][2];
@@ -288,6 +369,7 @@ class PipesScene : public Scene {
     }
 
     void Step() {
+        CommitPending();   // the previous step has finished growing
         for (auto& p : pipes) if (p.alive) StepPipe(p);
         int alive = 0;
         for (auto& p : pipes) alive += p.alive;
@@ -296,7 +378,7 @@ class PipesScene : public Scene {
         bool full = cellsFilled > total * 2 / 5 || startsFailed > 3;
         if (!full)
             while ((size_t)alive < maxAlive && StartPipe()) alive++;
-        if (full && alive == 0 && fade < 0) fade = 0;   // begin the clear
+        if (full && alive == 0 && fade < 0) { fade = 0; CommitPending(); }   // begin the clear
     }
 
 public:
@@ -392,6 +474,20 @@ public:
         p.texture = textured ? texture : nullptr;
         r.Draw(gpu, drawn, gpu.uploaded - drawn, p);
         drawn = gpu.uploaded;
+
+        // The pieces of the current step, grown as far as the step has got.
+        if (fade < 0 && !pending.empty()) {
+            float prog = stepTimer / stepInterval;
+            if (prog > 1) prog = 1;
+            partial.Clear();
+            out = &partial;
+            for (const Piece& pc : pending) {
+                float f = (prog * pc.total - pc.start) / pc.len;
+                if (f > 0) Build(pc, f > 1 ? 1 : f);
+            }
+            out = &mesh;
+            r.Draw(partial.verts.data(), partial.verts.size(), p);
+        }
 
         // Fade out before clearing: darken the kept image a bit each frame
         // (about 98% gone after one second, at any refresh rate).
