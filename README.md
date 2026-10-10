@@ -158,7 +158,7 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 * **Use as my saver** makes the selected `.scr` your Windows screen saver from where it is.
 * **Surprise me!** picks a random style. **Apply style to all** sets the current style on every saver.
 
-**Every  has the full Studio editor built in**, with its own live preview. Open it from *Settings → Themes & Effects...* (or *Display Settings → Themes & Effects...* in Pipes, Starfield and Polyhedra). Changes are saved straight away.
+**Every `.scr` has the full Studio editor built in**, with its own live preview. Open it from *Settings → Themes & Effects...* (or *Display Settings → Themes & Effects...* in Pipes, Starfield and Polyhedra). Changes are saved straight away.
 
 ![Themes & Effects inside a saver](docs/screenshots/themes_dialog.png)
 
@@ -203,7 +203,7 @@ The style options are:
 
 The renderer applies all of this on the GPU in a single full-screen pass over the finished image. That costs well under a millisecond, and nothing is added when the style is left at its defaults. Themes keep true black black, so the OLED savers still leave unused pixels off.
 
-The randomizer settings and favourites are shared by every saver and live in . Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
+The randomizer settings and favourites are shared by every saver and live in `Styles\_Random`. Styles are stored under `HKCU\Software\ScreenSaverRE\Styles\<saver file name>`. **Apply to all** also writes `Styles\_All`, which any saver without a style of its own uses.
 
 ## Rules every saver follows (same as `sspipes.scr`)
 
