@@ -74,7 +74,11 @@ public:
     // Blocks until this monitor is ready for a new frame (frame-latency
     // waitable object), keeping input-to-display latency at one frame.
     void WaitForFrame();
-    void BeginFrame(bool clearColor);
+    // True when vsync pacing comes from the frame-latency waitable object.
+    bool HasFrameWait() const { return frameWait != nullptr; }
+    // With persistent on, clearDepth=false keeps the depth buffer as well, so
+    // new geometry can be drawn into the previous frame's 3D scene.
+    void BeginFrame(bool clearColor, bool clearDepth = true);
     void SetCamera(const Mat4& view, const Mat4& proj) { this->view = view; this->proj = proj; }
     // Directional lights, directions given in view (camera) space.
     void SetLight(int i, const Vec3& dir, float r, float g, float b);
@@ -83,6 +87,10 @@ public:
     void Draw(const Vertex* v, size_t count, const DrawParams& p);      // streamed
     void Upload(GpuMesh& gm, const Mesh& m);                             // append new vertices
     void Draw(GpuMesh& gm, const DrawParams& p);
+    void Draw(GpuMesh& gm, size_t first, size_t count, const DrawParams& p);
+    // Switch to drawing straight onto this frame's final image (on top of a
+    // persistent scene) - for overlays that must not accumulate.
+    void BeginOverlay();
     void FullscreenQuad(float r, float g, float b, float a);             // alpha-blended
     void Present();   // waits for this monitor's vertical blank
 
@@ -97,6 +105,7 @@ private:
     int  width = 0, height = 0;
     double refreshPeriod = 1.0 / 60;
     bool persistent = false;
+    bool overlayActive = false;
     unsigned swapFlags = 0;
     HANDLE frameWait = nullptr;
 

@@ -13,7 +13,7 @@ CXX      = $(PREFIX)g++
 WINDRES  = $(PREFIX)windres
 CXXFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type -municode -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0A00 -std=c++11
 LDFLAGS  = -municode -mwindows -static -static-libgcc -static-libstdc++ -s
-LIBS     = -ld3d11 -ldxgi -luuid -lgdiplus -lcomctl32 -lcomdlg32 -lgdi32 -luser32 -ladvapi32
+LIBS     = -ld3d11 -ldxgi -luuid -lgdiplus -lcomctl32 -lcomdlg32 -lgdi32 -lwinmm -luser32 -ladvapi32
 
 SAVERS   = pipes starfield polyhedra
 OUT      = build

@@ -152,6 +152,7 @@ class PipesScene : public Scene {
     int cellsFilled = 0, startsFailed = 0;
     Texture* texture = nullptr;
     GpuMesh gpu;                       // pipe geometry on the GPU, appended as it grows
+    size_t drawn = 0;                  // vertices already in the kept image (0 = redraw all)
     bool textured = false;
 
     unsigned char& Cell(int x, int y, int z) { return occupied[(z * ny + y) * nx + x]; }
@@ -210,6 +211,7 @@ class PipesScene : public Scene {
     void NewRound() {
         mesh.Clear();
         gpu.Reset();
+        drawn = 0;
         std::fill(occupied.begin(), occupied.end(), 0);
         pipes.clear();
         cellsFilled = 0;
@@ -320,6 +322,10 @@ public:
                 texture = r.CreateTexture(px.data(), 64, 64);
             }
         }
+        // Like the original, the screen is never cleared during a round: the
+        // image (and its depth) is kept and only newly grown pieces are
+        // drawn, so a frame costs the same with 10 pipes or 10,000.
+        r.SetPersistent(true);
         // Stepping interval: 0.25 s (slow) .. 0.008 s (fast).
         stepInterval = 0.25f * powf(0.03f, g_speed / 100.0f);
         Resize(w, h);
@@ -329,6 +335,7 @@ public:
 
     void Resize(int w, int h) override {
         width = w; height = h > 0 ? h : 1;
+        drawn = 0;   // the renderer's kept image was recreated: redraw everything
         // Grid follows the screen's shape: wide for 3440x1440, tall for a
         // portrait 2160x3840, so pipes fill any monitor.
         float aspect = (float)width / height;
@@ -355,7 +362,8 @@ public:
             if (steps == 8) stepTimer = 0;
         }
 
-        r.BeginFrame(true);
+        bool fresh = drawn == 0;
+        r.BeginFrame(fresh, fresh);
         // Pull the camera back until all 8 corners of the (rotated) grid are
         // on screen - works for ultrawide, portrait and any camera angle.
         float aspect = (float)width / height;
@@ -382,9 +390,12 @@ public:
         p.specular[0] = p.specular[1] = p.specular[2] = 0.8f;
         p.shininess = 50;
         p.texture = textured ? texture : nullptr;
-        r.Draw(gpu, p);
+        r.Draw(gpu, drawn, gpu.uploaded - drawn, p);
+        drawn = gpu.uploaded;
 
-        if (fade >= 0) r.FullscreenQuad(0, 0, 0, fade > 1 ? 1 : fade);   // fade out before clearing
+        // Fade out before clearing: darken the kept image a bit each frame
+        // (about 98% gone after one second, at any refresh rate).
+        if (fade >= 0) r.FullscreenQuad(0, 0, 0, 1.0f - powf(0.02f, dt));
     }
 };
 

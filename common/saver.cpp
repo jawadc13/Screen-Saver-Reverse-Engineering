@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
+#include <mmsystem.h>
 
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E
@@ -170,7 +171,7 @@ static void ScreenKey(wchar_t* out, int index) { wsprintfW(out, L"Screen %d", in
 // Shared "Display Settings" dialog (the original has per-adapter tabs with
 // "Display screen saver / Display nothing on this monitor").
 // ---------------------------------------------------------------------------
-struct DisplayDlgState { std::vector<MonitorInfo> mons; std::vector<DWORD> black; DWORD same; int sel; };
+struct DisplayDlgState { std::vector<MonitorInfo> mons; std::vector<DWORD> black; DWORD same; DWORD graph; int sel; };
 
 static void DisplayDlgShow(HWND dlg, DisplayDlgState* s) {
     int i = s->sel;
@@ -196,6 +197,7 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         SendDlgItemMessageW(dlg, IDC_MONITOR_LIST, LB_SETCURSEL, 0, 0);
         CheckDlgButton(dlg, IDC_SAME_ON_ALL, s->same ? BST_CHECKED : BST_UNCHECKED);
         EnableWindow(GetDlgItem(dlg, IDC_SAME_ON_ALL), s->mons.size() > 1);
+        CheckDlgButton(dlg, IDC_FRAME_GRAPH, s->graph ? BST_CHECKED : BST_UNCHECKED);
         DisplayDlgShow(dlg, s);
         return TRUE;
     }
@@ -212,6 +214,7 @@ static INT_PTR CALLBACK DisplayDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         case IDOK: {
             s->same = IsDlgButtonChecked(dlg, IDC_SAME_ON_ALL) == BST_CHECKED;
             RegWriteDword(L"AllScreensSame", s->same);
+            RegWriteDword(L"Show Frame Graph", IsDlgButtonChecked(dlg, IDC_FRAME_GRAPH) == BST_CHECKED);
             for (size_t i = 0; i < s->mons.size(); i++) {
                 wchar_t key[32]; ScreenKey(key, (int)i);
                 RegWriteDword(L"Leave Black", s->black[i], key);
@@ -233,6 +236,7 @@ void ShowDisplaySettings(HWND parent) {
     s.mons = EnumMonitors();
     s.sel = 0;
     s.same = RegReadDword(L"AllScreensSame", 0);
+    s.graph = RegReadDword(L"Show Frame Graph", 0);
     for (size_t i = 0; i < s.mons.size(); i++) {
         wchar_t key[32]; ScreenKey(key, (int)i);
         s.black.push_back(RegReadDword(L"Leave Black", 0, key));
@@ -460,14 +464,72 @@ static double Now() {
     return (double)t.QuadPart / (double)freq.QuadPart;
 }
 
-// Waits until `until` (seconds, Now() clock): sleeps most of it, then spins.
+// Waits until `until` (seconds, Now() clock). Uses a high-resolution
+// waitable timer (Windows 10 1803+) - plain Sleep() can be ~15.6 ms late,
+// which is a whole 60 Hz frame - then spins the last half millisecond.
 static void WaitUntil(double until) {
+    static thread_local HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, 0x2 /* HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
     for (;;) {
         double left = until - Now();
         if (left <= 0) return;
-        if (left > 0.002) Sleep((DWORD)((left - 0.0015) * 1000));
-        else YieldProcessor();
+        if (left > 0.001) {
+            if (timer) {
+                LARGE_INTEGER due; due.QuadPart = -(LONGLONG)((left - 0.0005) * 1e7);   // relative, 100 ns units
+                SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+                WaitForSingleObject(timer, INFINITE);
+            } else {
+                Sleep((DWORD)((left - 0.0008) * 1000));   // timeBeginPeriod(1) is active
+            }
+        } else {
+            YieldProcessor();
+        }
     }
+}
+
+// Multimedia Class Scheduler: gives a render thread the steady, high-priority
+// scheduling Windows uses for games and video (avrt.dll, Vista+).
+static void JoinMmcss() {
+    HMODULE avrt = LoadLibraryW(L"avrt.dll");
+    if (!avrt) return;
+    typedef HANDLE (WINAPI *AVSETPROC)(LPCWSTR, LPDWORD);
+    auto set = (AVSETPROC)GetProcAddress(avrt, "AvSetMmThreadCharacteristicsW");
+    DWORD index = 0;
+    if (set) set(L"Games", &index);   // released automatically when the thread ends
+}
+
+static bool g_showGraph;
+
+// Diagnostics overlay: one bar per recent frame, height = time since the
+// previous frame. The white line is one refresh; green bars are on time,
+// red bars are hitches (a refresh was missed).
+static void DrawFrameGraph(Renderer& r, const float* hist, int count, int head, double period) {
+    std::vector<Vertex> v;
+    const float sx = 2.0f / r.Width(), sy = 2.0f / r.Height();
+    const float x0 = 20, y0 = 20, unit = 30;
+    float barW = (r.Width() - 2 * x0) / count;   // fit narrow (portrait) screens
+    if (barW > 3) barW = 3;
+    auto quad = [&](float x, float y, float w, float h, unsigned char cr, unsigned char cg, unsigned char cb) {
+        float ax = -1 + x * sx, ay = -1 + y * sy, bx = -1 + (x + w) * sx, by = -1 + (y + h) * sy;
+        float p[6][2] = { {ax,ay}, {bx,ay}, {bx,by}, {ax,ay}, {bx,by}, {ax,by} };
+        for (auto& q : p) { Vertex vx = { q[0], q[1], 0.5f, 0, 0, 1, 0, 0, cr, cg, cb, 220 }; v.push_back(vx); }
+    };
+    quad(x0 - 4, y0 - 4, count * barW + 8, unit * 3 + 8, 0, 0, 0);
+    for (int i = 0; i < count; i++) {
+        float d = hist[(head + i) % count];
+        if (d <= 0) continue;
+        float h = (float)(d / period) * unit;
+        if (h > unit * 3) h = unit * 3;
+        bool late = d > period * 1.5;
+        quad(x0 + i * barW, y0, barW > 1.5f ? barW - 1 : barW, h, late ? 255 : 40, late ? 50 : 220, late ? 50 : 60);
+    }
+    quad(x0, y0 + unit, count * barW, 1, 255, 255, 255);
+    r.BeginOverlay();   // on top of the final image, never into a persistent scene
+    r.SetCamera(Mat4::Identity(), Mat4::Identity());
+    DrawParams p;
+    p.lit = false;
+    p.depth = false;
+    p.blend = BLEND_ALPHA;
+    r.Draw(v.data(), v.size(), p);
 }
 
 // One render thread per monitor. Each has its own Direct3D 11 device -
@@ -477,10 +539,12 @@ static void WaitUntil(double until) {
 static DWORD WINAPI RenderThread(LPVOID param) {
     auto* w = (SaverWindow*)param;
     g_rng = &w->rng;
-    if (g_mode == SM_PREVIEW)
+    if (g_mode == SM_PREVIEW) {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);  // keep Control Panel responsive
-    else
+    } else {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);  // steady frame pacing
+        JoinMmcss();
+    }
 
     RECT rc; GetClientRect(w->hwnd, &rc);
     w->width = rc.right; w->height = rc.bottom;
@@ -501,6 +565,9 @@ static DWORD WINAPI RenderThread(LPVOID param) {
     } else {
         w->scene->Resize(w->width, w->height);
         const double period = r->RefreshPeriod();
+        const int kGraph = 240;
+        float hist[kGraph] = {};
+        int histHead = 0;
         double last = Now();
         while (!g_quitting) {
             int nw = w->newW, nh = w->newH;
@@ -515,6 +582,8 @@ static DWORD WINAPI RenderThread(LPVOID param) {
             double now = Now();
             double dt = now - last;
             last = now;
+            hist[histHead] = (float)dt;
+            histHead = (histHead + 1) % kGraph;
             // Snap to whole refresh periods: sub-millisecond timer jitter
             // would otherwise show up as uneven motion. Variable frame rates
             // (G-Sync, or a frame that ran long) keep the measured dt.
@@ -523,11 +592,14 @@ static DWORD WINAPI RenderThread(LPVOID param) {
             if (dt > 0.1) dt = 0.1;   // avoid big jumps after stalls
             if (w->width > 0 && w->height > 0) {
                 w->scene->Frame(*r, (float)dt);
+                if (g_showGraph && g_mode != SM_PREVIEW) DrawFrameGraph(*r, hist, kGraph, histHead, period);
                 r->Present();
             }
-            // If vsync is forced off in the driver, frames come back much
-            // faster than one refresh: pace them manually.
-            if (Now() - now < period * 0.5) WaitUntil(now + period);
+            // Normally the frame-latency waitable object paces us to this
+            // monitor's vsync. Only without it (old Windows / legacy swap
+            // chain), or if frames come back far too fast because vsync is
+            // forced off in the driver, pace manually.
+            if (!r->HasFrameWait() && Now() - now < period * 0.5) WaitUntil(now + period);
         }
         delete w->scene;
         w->scene = nullptr;
@@ -560,6 +632,8 @@ static int RunSaver() {
     uint32_t seed = (uint32_t)GetTickCount() ^ (uint32_t)GetCurrentProcessId() * 2654435761u;
     if (!seed) seed = 1;
     bool same = RegReadDword(L"AllScreensSame", 0) != 0;
+    g_showGraph = RegReadDword(L"Show Frame Graph", 0) != 0;
+    timeBeginPeriod(1);   // 1 ms timer resolution while running
 
     wchar_t title[128];
     LoadStringW(g_hInst, IDS_DESCRIPTION, title, 128);
@@ -612,6 +686,7 @@ static int RunSaver() {
     StopRenderThreads();
     for (auto* w : g_windows) delete w;
     g_windows.clear();
+    timeEndPeriod(1);
     if (g_mode != SM_PREVIEW) {
         ShowCursor(TRUE);
         if (g_isWin9x) { BOOL old; SystemParametersInfoW(SPI_SETSCREENSAVERRUNNING, FALSE, &old, 0); }

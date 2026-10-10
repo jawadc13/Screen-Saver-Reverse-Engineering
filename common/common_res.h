@@ -12,6 +12,7 @@
 #define IDC_SHOW_SAVER             1102
 #define IDC_LEAVE_BLACK            1103
 #define IDC_SAME_ON_ALL            1104
+#define IDC_FRAME_GRAPH            1105
 
 // D3DSaver error strings (2100..2112 in the original)
 #define IDS_ERR_GENERIC            2100

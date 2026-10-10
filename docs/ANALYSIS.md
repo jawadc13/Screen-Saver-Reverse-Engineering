@@ -120,3 +120,9 @@ A pipe arrives at cell centre **P** moving along **din** and leaves along **dout
 * Textures load through **GDI+** (BMP/JPG/PNG/GIF). TGA is not supported. D3DX is not used.
 * The Display Settings dialog has no "Disable hardware 3D rendering" or display-mode options. It keeps the per-monitor "Display nothing" choice and "same on all monitors" (`AllScreensSame`).
 * There is no `control.ini` migration.
+* **Frame pacing details:**
+  * Swap chains hold 3 buffers with a maximum frame latency of 2. Rotated (portrait) monitors are composed by Windows every frame, and the extra queued frame absorbs delays there.
+  * Render threads join the MMCSS "Games" class.
+  * Manual pacing, used only without a frame-latency waitable object, waits on a high-resolution waitable timer instead of `Sleep()`.
+* **Pipes never redraws old pipes.** Like the original, it keeps the image and depth buffer between frames and draws only newly grown pieces. A frame costs the same at the end of a round as at the start.
+* **Frame-time graph:** turn on *Display Settings → Show frame-time graph* to show a graph in the bottom-left corner. It has one bar per frame and a white line at one refresh. Red bars mark missed refreshes.

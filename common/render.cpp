@@ -162,7 +162,7 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     for (DXGI_SWAP_EFFECT e : effects) {
         sd.SwapEffect = e;
         bool flip = e != DXGI_SWAP_EFFECT_DISCARD;
-        sd.BufferCount = flip ? 2 : 1;
+        sd.BufferCount = flip ? 3 : 1;   // triple buffering: slack for a slow composition
         sd.Flags = swapFlags = flip ? 0x40 /* FRAME_LATENCY_WAITABLE_OBJECT */ : 0;
         if (SUCCEEDED(f2->CreateSwapChainForHwnd(dev, hwnd, &sd, nullptr, nullptr, &swap))) break;
     }
@@ -173,7 +173,11 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     if (swapFlags) {
         IDXGISwapChain2* s2 = nullptr;
         if (SUCCEEDED(swap->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&s2))) {
-            s2->SetMaximumFrameLatency(1);
+            // Two frames may be queued. A rotated (portrait) monitor is
+            // composed by Windows every frame; with one frame of slack, any
+            // delay there drops a frame. Two absorbs it (latency doesn't
+            // matter for a screensaver).
+            s2->SetMaximumFrameLatency(2);
             frameWait = s2->GetFrameLatencyWaitableObject();
             s2->Release();
         }
@@ -293,13 +297,14 @@ void Renderer::WaitForFrame() {
     if (frameWait) WaitForSingleObjectEx(frameWait, 1000, TRUE);
 }
 
-void Renderer::BeginFrame(bool clearColor) {
+void Renderer::BeginFrame(bool clearColor, bool clearDepth) {
+    overlayActive = false;
     ID3D11RenderTargetView* rtv = persistent ? persistRtv : backRtv;
     ctx->OMSetRenderTargets(1, &rtv, dsv);
     D3D11_VIEWPORT vp = { 0, 0, (float)width, (float)height, 0, 1 };
     ctx->RSSetViewports(1, &vp);
     if (clearColor) { float black[4] = { 0, 0, 0, 1 }; ctx->ClearRenderTargetView(rtv, black); }
-    ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+    if (clearDepth || !persistent) ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
     ctx->IASetInputLayout(layout);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx->VSSetShader(vs, nullptr, 0);
@@ -387,12 +392,27 @@ void Renderer::Upload(GpuMesh& gm, const Mesh& m) {
     gm.uploaded = n;
 }
 
-void Renderer::Draw(GpuMesh& gm, const DrawParams& p) {
-    if (!gm.buffer || !gm.uploaded) return;
+void Renderer::Draw(GpuMesh& gm, const DrawParams& p) { Draw(gm, 0, gm.uploaded, p); }
+
+void Renderer::Draw(GpuMesh& gm, size_t first, size_t count, const DrawParams& p) {
+    if (!gm.buffer || first >= gm.uploaded) return;
+    if (first + count > gm.uploaded) count = gm.uploaded - first;
+    if (!count) return;
     ApplyState(p);
     UINT stride = sizeof(Vertex), offset = 0;
     ctx->IASetVertexBuffers(0, 1, &gm.buffer, &stride, &offset);
-    ctx->Draw((UINT)gm.uploaded, 0);
+    ctx->Draw((UINT)count, (UINT)first);
+}
+
+void Renderer::BeginOverlay() {
+    if (!persistent || overlayActive || !persistTex) return;
+    ID3D11Texture2D* back = nullptr;
+    if (SUCCEEDED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
+        ctx->CopyResource(back, persistTex);
+        back->Release();
+    }
+    ctx->OMSetRenderTargets(1, &backRtv, nullptr);
+    overlayActive = true;
 }
 
 void Renderer::FullscreenQuad(float r, float g, float b, float a) {
@@ -414,7 +434,7 @@ void Renderer::FullscreenQuad(float r, float g, float b, float a) {
 }
 
 void Renderer::Present() {
-    if (persistent && persistTex) {
+    if (persistent && persistTex && !overlayActive) {
         ID3D11Texture2D* back = nullptr;
         if (SUCCEEDED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
             ctx->CopyResource(back, persistTex);
