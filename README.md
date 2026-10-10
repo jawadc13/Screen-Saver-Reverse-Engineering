@@ -175,8 +175,8 @@ Every saver has a **Display Settings...** button. It lets you pick, per monitor,
 
 The full-screen OLED-safe savers' screen care (see below) is available in every saver. Find it in the **OLED screen care** row of *Themes & Effects* and the Studio:
 
-* **Rest to black every** *N* minutes (Never, or 1 to 60) **for** 5 s to 2 min. The screen fades to complete black, rests, then fades back in. Rest time doesn't count as saver time.
-* **Pixel orbit** (on by default) shifts the whole image a few pixels round a slow circle.
+* **Rest to black every** *N* minutes (Never, or 1 to 60) **for** 5 s to 2 min. The screen fades to complete black, rests, then fades back in. The **fade** setting sets how long each fade takes: 1 to 10 s, default 5 s. The full-screen OLED-safe savers use it too. Rest time doesn't count as saver time.
+* **Pixel orbit** (on by default) moves the finished image a few whole pixels round a slow circle. The image moves as one piece, so scenes that build up over time, like Pipes, never separate.
 * **Burn-in guard** (on by default) dims any region that stays bright and unchanging for about 45 s. If a fifth of the screen stays static for 20 s, it starts a rest early, even when scheduled rests are off.
 
 The full-screen OLED-safe (`Safe_`) savers keep their own rest settings, including the rolling band, in their *Settings*. They always run the guard and the orbit.
