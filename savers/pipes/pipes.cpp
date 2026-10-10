@@ -395,7 +395,7 @@ public:
 
         // Fade out before clearing: darken the kept image a bit each frame
         // (about 98% gone after one second, at any refresh rate).
-        if (fade >= 0) r.FullscreenQuad(0, 0, 0, 1.0f - powf(0.02f, dt));
+        if (fade >= 0) r.FadeToBlack(1.0f - powf(0.02f, dt));
     }
 };
 

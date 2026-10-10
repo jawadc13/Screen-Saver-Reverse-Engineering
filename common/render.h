@@ -30,7 +30,7 @@ struct ID3D11RasterizerState;
 struct ID3D11SamplerState;
 struct IDXGISwapChain1;
 
-enum BlendMode { BLEND_OPAQUE, BLEND_ALPHA, BLEND_ADD };
+enum BlendMode { BLEND_OPAQUE, BLEND_ALPHA, BLEND_ADD, BLEND_SUBTRACT };   // subtract: dest - src
 
 struct Texture {
     ID3D11ShaderResourceView* srv = nullptr;
@@ -55,6 +55,7 @@ struct DrawParams {
     float     specular[3] = { 0, 0, 0 };
     float     shininess = 32;
     Texture*  texture = nullptr;
+    float     rim = 0;                     // edge glow strength (lit only)
 };
 
 class Renderer {
@@ -91,7 +92,11 @@ public:
     // Switch to drawing straight onto this frame's final image (on top of a
     // persistent scene) - for overlays that must not accumulate.
     void BeginOverlay();
-    void FullscreenQuad(float r, float g, float b, float a);             // alpha-blended
+    void FullscreenQuad(float r, float g, float b, float a, BlendMode mode = BLEND_ALPHA);
+    // Darken the kept image for trails: multiply by (1 - alpha), then also
+    // subtract one 8-bit step so faint trails reach true black instead of
+    // getting stuck as grey ghosts (8-bit rounding).
+    void FadeToBlack(float alpha);
     void Present();   // waits for this monitor's vertical blank
 
     Texture* CreateTexture(const unsigned* bgra, int w, int h);
@@ -123,7 +128,7 @@ private:
     ID3D11Buffer* cb = nullptr;
     ID3D11Buffer* stream = nullptr;
     size_t streamCap = 0, streamPos = 0;
-    ID3D11BlendState* blend[3] = {};
+    ID3D11BlendState* blend[4] = {};
     ID3D11DepthStencilState* depthOn = nullptr;
     ID3D11DepthStencilState* depthOff = nullptr;
     ID3D11RasterizerState* raster = nullptr;

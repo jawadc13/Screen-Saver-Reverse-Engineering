@@ -14,6 +14,8 @@
 #define IDC_SAME_ON_ALL            1104
 #define IDC_FRAME_GRAPH            1105
 
+#define IDD_SIMPLE_CONFIG          300   // generic settings dialog (simplecfg.cpp)
+
 // D3DSaver error strings (2100..2112 in the original)
 #define IDS_ERR_GENERIC            2100
 #define IDS_ERR_NOGL               2101

@@ -18,7 +18,7 @@ cbuffer CB : register(b0) {
     float4 lightDir[2];
     float4 lightColor[2];
     float4 ambient;
-    float4 flags;         // x = lit, y = textured, z = vertex color
+    float4 flags;         // x = lit, y = textured, z = vertex color, w = rim light
 };
 Texture2D tex : register(t0);
 SamplerState samp : register(s0);
@@ -48,7 +48,9 @@ float4 PS(PSIn i) : SV_Target {
         diff += lightColor[k].rgb * max(d, 0);
         if (d > 0) spec += lightColor[k].rgb * pow(max(dot(n, normalize(L + v)), 0), specular.a);
     }
-    return float4(base.rgb * diff + spec * specular.rgb, base.a);
+    // Rim light: edges seen at a grazing angle glow (glass, soap film).
+    float rim = flags.w * pow(1 - saturate(abs(dot(n, v))), 3);
+    return float4(base.rgb * diff + spec * specular.rgb + rim * base.rgb * 4, base.a);
 }
 )";
 
@@ -216,13 +218,13 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(dev->CreateBuffer(&bd, nullptr, &cb))) return false;
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         D3D11_BLEND_DESC b = {};
         auto& rt = b.RenderTarget[0];
         rt.BlendEnable = i != BLEND_OPAQUE;
-        rt.SrcBlend = D3D11_BLEND_SRC_ALPHA;
-        rt.DestBlend = i == BLEND_ADD ? D3D11_BLEND_ONE : D3D11_BLEND_INV_SRC_ALPHA;
-        rt.BlendOp = D3D11_BLEND_OP_ADD;
+        rt.SrcBlend = i == BLEND_SUBTRACT ? D3D11_BLEND_ONE : D3D11_BLEND_SRC_ALPHA;
+        rt.DestBlend = (i == BLEND_ADD || i == BLEND_SUBTRACT) ? D3D11_BLEND_ONE : D3D11_BLEND_INV_SRC_ALPHA;
+        rt.BlendOp = i == BLEND_SUBTRACT ? D3D11_BLEND_OP_REV_SUBTRACT : D3D11_BLEND_OP_ADD;
         rt.SrcBlendAlpha = D3D11_BLEND_ONE;
         rt.DestBlendAlpha = D3D11_BLEND_ZERO;
         rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
@@ -334,7 +336,7 @@ void Renderer::ApplyState(const DrawParams& p) {
     c.flags[0] = p.lit ? 1.0f : 0.0f;
     c.flags[1] = p.texture ? 1.0f : 0.0f;
     c.flags[2] = p.vertexColor ? 1.0f : 0.0f;
-    c.flags[3] = 0;
+    c.flags[3] = p.rim;
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         memcpy(m.pData, &c, sizeof(c));
@@ -415,8 +417,14 @@ void Renderer::BeginOverlay() {
     overlayActive = true;
 }
 
-void Renderer::FullscreenQuad(float r, float g, float b, float a) {
-    unsigned char c[4] = { (unsigned char)(r * 255), (unsigned char)(g * 255), (unsigned char)(b * 255), (unsigned char)(a * 255 + 0.5f) };
+void Renderer::FadeToBlack(float alpha) {
+    FullscreenQuad(0, 0, 0, alpha);
+    FullscreenQuad(1.0f / 255, 1.0f / 255, 1.0f / 255, 1, BLEND_SUBTRACT);
+}
+
+void Renderer::FullscreenQuad(float r, float g, float b, float a, BlendMode mode) {
+    auto byte = [](float x) { return (unsigned char)(x <= 0 ? 0 : x >= 1 ? 255 : x * 255 + 0.5f); };
+    unsigned char c[4] = { byte(r), byte(g), byte(b), byte(a) };
     Vertex v[6];
     float xy[6][2] = { {-1,-1}, {1,-1}, {1,1}, {-1,-1}, {1,1}, {-1,1} };
     for (int i = 0; i < 6; i++) {
@@ -428,7 +436,7 @@ void Renderer::FullscreenQuad(float r, float g, float b, float a) {
     DrawParams p;
     p.lit = false;
     p.depth = false;
-    p.blend = BLEND_ALPHA;
+    p.blend = mode;
     Draw(v, 6, p);
     view = savedView; proj = savedProj;
 }

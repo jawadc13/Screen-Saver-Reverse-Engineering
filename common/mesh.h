@@ -50,6 +50,15 @@ struct Mat4 {
         r.m[2][0] = t * a.x * a.z - s * a.y; r.m[2][1] = t * a.y * a.z + s * a.x; r.m[2][2] = t * a.z * a.z + c;
         return r;
     }
+    // Camera at `eye` looking at `target` (like gluLookAt).
+    static Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
+        Vec3 f = Normalize(target - eye), sd = Normalize(Cross(f, up)), u = Cross(sd, f);
+        Mat4 r = Identity();
+        r.m[0][0] = sd.x; r.m[0][1] = sd.y; r.m[0][2] = sd.z; r.m[0][3] = -Dot(sd, eye);
+        r.m[1][0] = u.x;  r.m[1][1] = u.y;  r.m[1][2] = u.z;  r.m[1][3] = -Dot(u, eye);
+        r.m[2][0] = -f.x; r.m[2][1] = -f.y; r.m[2][2] = -f.z; r.m[2][3] = Dot(f, eye);
+        return r;
+    }
     // Perspective projection with Direct3D's [0,1] depth range.
     static Mat4 Perspective(float fovyDeg, float aspect, float zn, float zf) {
         float f = 1.0f / tanf(fovyDeg * kPi / 360);

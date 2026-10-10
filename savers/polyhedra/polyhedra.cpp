@@ -191,7 +191,7 @@ public:
         // With trails the previous frame is kept and darkened a little each
         // frame instead of cleared; same trail length at any refresh rate.
         r.BeginFrame(!g_trails);
-        if (g_trails) r.FullscreenQuad(0, 0, 0, 1.0f - powf(0.75f, dt * 60.0f));
+        if (g_trails) r.FadeToBlack(1.0f - powf(0.75f, dt * 60.0f));
 
         float aspect = (float)width / height;
         float dist = boxY / tanf(22.5f * kPi / 180) + boxZ;

@@ -1,6 +1,7 @@
 // common.rc - resources every screensaver shares. #included from each
 // saver's own .rc file.
 #include <windows.h>
+#include <commctrl.h>
 #include "common_res.h"
 
 1 24 "saver.manifest"   // RT_MANIFEST: common controls v6, like the original
@@ -32,4 +33,38 @@ BEGIN
     LTEXT           "Note: each monitor is drawn by its own graphics card at its own resolution and refresh rate.", -1, 84, 116, 169, 28
     DEFPUSHBUTTON   "OK", IDOK, 146, 165, 50, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 203, 165, 50, 14
+END
+
+// Generic settings dialog; simplecfg.cpp positions and labels the rows.
+IDD_SIMPLE_CONFIG DIALOGEX 0, 0, 227, 200
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Settings"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    GROUPBOX        "Settings", 1360, 7, 7, 213, 150
+    LTEXT           "", 1300, 0, 0, 10, 8
+    COMBOBOX        1310, 0, 0, 10, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "", 1301, 0, 0, 10, 8
+    COMBOBOX        1311, 0, 0, 10, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "", 1302, 0, 0, 10, 8
+    COMBOBOX        1312, 0, 0, 10, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "", 1320, 0, 0, 10, 8
+    LTEXT           "", 1340, 0, 0, 10, 8
+    CONTROL         "", 1330, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 0, 0, 10, 16
+    LTEXT           "", 1350, 0, 0, 10, 8
+    LTEXT           "", 1321, 0, 0, 10, 8
+    LTEXT           "", 1341, 0, 0, 10, 8
+    CONTROL         "", 1331, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 0, 0, 10, 16
+    LTEXT           "", 1351, 0, 0, 10, 8
+    LTEXT           "", 1322, 0, 0, 10, 8
+    LTEXT           "", 1342, 0, 0, 10, 8
+    CONTROL         "", 1332, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 0, 0, 10, 16
+    LTEXT           "", 1352, 0, 0, 10, 8
+    LTEXT           "", 1323, 0, 0, 10, 8
+    LTEXT           "", 1343, 0, 0, 10, 8
+    CONTROL         "", 1333, TRACKBAR_CLASS, TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 0, 0, 10, 16
+    LTEXT           "", 1353, 0, 0, 10, 8
+    PUSHBUTTON      "&Display Settings...", 1361, 7, 179, 75, 14
+    DEFPUSHBUTTON   "OK", IDOK, 116, 179, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 170, 179, 50, 14
 END

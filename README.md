@@ -20,8 +20,28 @@ The full findings are in **[docs/ANALYSIS.md](docs/ANALYSIS.md)**: identity, imp
 | `Pipes.scr` | Recreation of 3D Pipes: pipes grow through a 3D grid. | Single/Multiple; Elbow/Ball/Mixed/Cycle joints; Solid/Textured (BMP/JPG/PNG/GIF); Speed |
 | `Starfield.scr` | Flying through stars with warp trails. | Colors (White/Tinted/Rainbow); Warp trails; Speed; Density |
 | `Polyhedra.scr` | Shiny Platonic solids tumbling and bouncing. | Shape (or Mixed); Number; Motion trails; Speed |
+| `Mystify.scr` | Classic Mystify: bouncing polygons with fading echoes. | Shapes 1-4; Colors; Speed; Corners; Echoes |
+| `Matrix.scr` | Matrix-style rain of glyph columns. Uses katakana when a Japanese font is installed, otherwise Latin. | Colors; Glyphs (Katakana/Binary/Hex/Latin); Speed; Density; Glyph size |
+| `Tunnel.scr` | Flying down an endless winding tube. | Style (Checkerboard/Neon rings/Stripes/Hex plates); Colors; Speed; Twistiness |
+| `Ribbons.scr` | Glowing twisting ribbons sweeping through 3D (after Vista/7 Ribbons). | Colors; Speed; Number; Width |
+| `Bubbles.scr` | Glassy soap bubbles with rim light and highlights (after Windows 7 Bubbles). | Tint; Speed; Number; Size |
+| `Plasma.scr` | Demoscene color plasma. | Palette; Speed; Pattern size |
+| `Fireworks.scr` | Rockets bursting into peony, ring, star and two-color shells, with trails. | Colors; Launches; Burst size; Trail length |
+| `FlowerBox.scr` | Spinning cube morphing to a sphere and a flower (after XP's 3D Flower Box). | Colors; Shape (Flower/Star/Blob); Spin; Morph speed; Size |
 
-Every saver has a **Display Settings...** button. It lets you pick, per monitor, whether to show the saver or nothing, and whether every monitor shows the same animation.
+| | |
+|---|---|
+| ![](docs/screenshots/pipes.png) | ![](docs/screenshots/mystify.png) |
+| ![](docs/screenshots/tunnel.png) | ![](docs/screenshots/matrix.png) |
+| ![](docs/screenshots/bubbles.png) | ![](docs/screenshots/fireworks.png) |
+| ![](docs/screenshots/plasma.png) | ![](docs/screenshots/flowerbox.png) |
+| ![](docs/screenshots/ribbons.png) | ![](docs/screenshots/starfield.png) |
+
+Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flower Box):
+
+![](docs/screenshots/portrait.png)
+
+Every saver has a **Display Settings...** button. It lets you pick, per monitor, whether to show the saver or nothing, and whether every monitor shows the same animation. It also has an optional frame-time graph.
 
 ## Rules every saver follows (same as `sspipes.scr`)
 
@@ -43,7 +63,7 @@ The savers render with **Direct3D 11** (the original used Direct3D 8) and run on
 On Linux with MinGW-w64 (`apt install g++-mingw-w64-x86-64`), or with MSYS2 on Windows:
 
 ```sh
-make            # -> build/pipes.scr, build/starfield.scr, build/polyhedra.scr (64-bit)
+make            # -> build/*.scr, one per saver (64-bit)
 make ARCH=x86   # 32-bit build
 ```
 
@@ -64,4 +84,11 @@ tools/            pe_inspect.py (analysis), make_icons.py (icon generator)
 docs/             ANALYSIS.md + screenshots
 ```
 
-To add a new saver, create `savers/<name>/` and implement `RegistryName()`, `LoadSettings()`, `ShowConfigDialog()` and `CreateScene()` (see `common/saver.h`). Then add the name to `SAVERS` in the Makefile.
+### Adding a new saver
+
+1. `python3 tools/new_saver.py <name> "<Display Name>" "<Description>"` writes the resource files and adds the saver to the Makefile.
+2. Write `savers/<name>/<name>.cpp`. Implement `RegistryName()`, `LoadSettings()`, `ShowConfigDialog()` and `CreateScene()` (see `common/saver.h`).
+   * Most savers describe their settings in a `SimpleConfig` (`common/simplecfg.h`), which builds the settings dialog automatically.
+   * Use `common/scenekit.h` for colors, quads and 2D drawing.
+   * `savers/mystify/mystify.cpp` is a compact example.
+3. Add an icon function to `tools/make_icons.py`, then run `make`.
