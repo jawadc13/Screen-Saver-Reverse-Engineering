@@ -56,6 +56,8 @@ struct DrawParams {
     float     shininess = 32;
     Texture*  texture = nullptr;
     float     rim = 0;                     // edge glow strength (lit only)
+    float     fogColor[3] = { 0, 0, 0 };   // distance fog towards this colour
+    float     fogDensity = 0;              // 0 = no fog
 };
 
 class Renderer {
@@ -105,9 +107,18 @@ public:
 
     Texture* CreateTexture(const unsigned* bgra, int w, int h);
 
+    // OLED care. Shift (and slightly scale up, so edges stay covered) the
+    // whole image by a few pixels; restkit.h orbits it slowly.
+    void SetPixelShift(float dxPixels, float dyPixels, float scale);
+    // Queue a tiny (<= 64x64) luminance snapshot of the current scene, and
+    // fetch the oldest finished one (0..1 per cell) without stalling the GPU.
+    void RequestLuminance();
+    bool PollLuminance(std::vector<float>& out, int& gw, int& gh);
+
 private:
     void ApplyState(const DrawParams& p);
     void ResolveToBackBuffer();
+    void CreateLumTargets();
     void CreateTargets();
     void ReleaseTargets();
 
@@ -144,4 +155,11 @@ private:
     float lightDir[2][4] = {};
     float lightColor[2][4] = {};
     float ambient[3] = { 0.1f, 0.1f, 0.1f };
+    float shiftX = 0, shiftY = 0, shiftScale = 1;
+
+    ID3D11Texture2D* lumTex = nullptr;
+    ID3D11ShaderResourceView* lumSrv = nullptr;
+    ID3D11Texture2D* lumStaging[3] = {};
+    bool lumPending[3] = {};
+    int  lumWrite = 0, lumLevel = 0, lumW = 1, lumH = 1;
 };

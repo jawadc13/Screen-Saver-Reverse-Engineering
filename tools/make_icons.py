@@ -277,3 +277,24 @@ for name, fn in (('pipes', pipes), ('starfield', starfield), ('polyhedra', polyh
 for i, name in enumerate(OLED_NAMES):
     write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), oled_icon(i))
     print('wrote', name)
+
+FULL_NAMES = ['ocean', 'cloudflight', 'lavalamp', 'northernlights', 'kaleidoscope', 'voronoi', 'flowfield', 'neoncity',
+              'nebula', 'caustics', 'dunes', 'rainywindow', 'lowpoly', 'inkswirls', 'retrosunset', 'sakura', 'snownight',
+              'harmony', 'hexpulse', 'wormhole']
+
+
+def full_icon(index):
+    """Colourful full-background icon: a two-hue gradient with a soft wave."""
+    h1, h2 = index / 20.0, index / 20.0 + 0.25
+
+    def pixel(x, y):
+        wave = 16 + 5 * math.sin(x * 0.3 + index)
+        if abs(y - wave) < 2.2:
+            return hsv(h2, 0.3, 1)
+        return hsv(h1 + (y / 31.0) * 0.15, 0.7, 0.45 + 0.5 * (1 - y / 31.0) if y < wave else 0.35)
+    return pixel
+
+
+for i, name in enumerate(FULL_NAMES):
+    write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), full_icon(i))
+    print('wrote', name)

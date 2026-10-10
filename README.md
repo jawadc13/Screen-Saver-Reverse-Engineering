@@ -94,6 +94,46 @@ Settings in each: Colors (Cyan, Magenta, Amber, Green, Ice blue, Rainbow, White)
 
 ![](docs/screenshots/oled_all.png)
 
+### OLED-safe full-screen collection (20 savers)
+
+These fill the whole screen with colour but still protect an OLED panel: every pixel gets to rest, and nothing stays lit and still. The protection lives in `common/restkit.h` and runs around every scene:
+
+1. **Burn-in guard.** A few times a second the GPU shrinks the frame to a tiny (≤ 64×64) snapshot that the CPU reads back without stalling. For every region the guard tracks average brightness and how much it changes. A region that stays **bright and static for about 45 seconds is dimmed in place**, smoothly, until it changes again. If a fifth of the screen goes static, a full rest starts early.
+2. **Scheduled rest to black.** Every *N* minutes (1–15, default 5) the scene fades to complete black, rests (5–60 s, default 15 s), and returns as a **new variation**: new colours, camera and layout.
+3. **Rolling rest band** (optional, Off / Subtle / Strong). A soft dark band slowly sweeps the screen in changing directions.
+4. **Pixel orbit.** The whole image shifts a few pixels round a slow circle, so even hard edges never sit on exactly the same pixels.
+
+Test result under Wine: a deliberately static white block (registry value `BurnInTest` = 1) was dimmed from 92% to 26% brightness, while the moving scene around it was untouched:
+
+![](docs/screenshots/oledsafe_guard.png)
+
+| File | Scene |
+|---|---|
+| `Safe_Ocean.scr` | Gliding over rolling, sunlit ocean swells (morning, midday, sunset, moonlit) |
+| `Safe_CloudFlight.scr` | Flying through soft sunlit clouds |
+| `Safe_LavaLamp.scr` | Glowing wax blobs rising, merging and sinking |
+| `Safe_NorthernLights.scr` | Aurora curtains over snowy mountains under turning stars |
+| `Safe_Kaleidoscope.scr` | Ever-turning mirrored patterns (6–16 mirrors) |
+| `Safe_Voronoi.scr` | Living stained-glass cells (GPU Voronoi) |
+| `Safe_FlowField.scr` | Thousands of particles painting silky currents |
+| `Safe_NeonCity.scr` | Flying over an endless night city of glowing windows |
+| `Safe_Nebula.scr` | Drifting through glowing interstellar gas |
+| `Safe_Caustics.scr` | Rippling sunlight on a sandy sea floor |
+| `Safe_Dunes.scr` | Gliding over golden dunes in low sunlight |
+| `Safe_RainyWindow.scr` | Raindrops trickling over blurred city lights |
+| `Safe_LowPoly.scr` | Flat-shaded pastel mountains and valleys |
+| `Safe_InkSwirls.scr` | Coloured ink curling through clear water |
+| `Safe_RetroSunset.scr` | 80s synthwave sunset over a racing neon grid |
+| `Safe_Sakura.scr` | Cherry blossom petals over spring hills |
+| `Safe_SnowyNight.scr` | Snow over moonlit pine hills |
+| `Safe_Harmony.scr` | Glossy flowing bands of colour |
+| `Safe_HexPulse.scr` | Hexagonal pillars rising and falling in waves |
+| `Safe_Wormhole.scr` | Falling through a swirling wormhole |
+
+Settings in each: a palette or time-of-day choice, Rolling rest band, Speed, one saver-specific slider, Rest to black every (1–15 min), and Rest length (5–60 s).
+
+![](docs/screenshots/oledsafe_all.png)
+
 Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flower Box):
 
 ![](docs/screenshots/portrait.png)

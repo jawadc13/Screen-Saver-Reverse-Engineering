@@ -20,6 +20,8 @@ cbuffer CB : register(b0) {
     float4 lightColor[2];
     float4 ambient;
     float4 flags;         // x = lit, y = textured, z = vertex color, w = rim light
+    float4 fog;           // rgb = fog colour, a = density (0 = off)
+    float4 shift;         // xy = whole-image offset (NDC), z = scale (pixel orbit)
 };
 Texture2D tex : register(t0);
 SamplerState samp : register(s0);
@@ -30,15 +32,19 @@ PSIn VS(VSIn i) {
     float4 p = mul(worldView, float4(i.pos, 1));
     o.vpos = p.xyz;
     o.pos = mul(proj, p);
+    o.pos.xy = o.pos.xy * shift.z + shift.xy * o.pos.w;
     o.nrm = mul(worldView, float4(i.nrm, 0)).xyz;
     o.uv = i.uv;
     o.col = i.col;
     return o;
 }
+float3 Fog(float3 c, float3 vpos) {
+    return lerp(c, fog.rgb, 1 - exp(-fog.a * length(vpos)));
+}
 float4 PS(PSIn i) : SV_Target {
     float4 base = flags.z > 0.5 ? i.col : matColor;
     if (flags.y > 0.5) base *= tex.Sample(samp, i.uv);
-    if (flags.x < 0.5) return base;
+    if (flags.x < 0.5) return float4(Fog(base.rgb, i.vpos), base.a);
     float3 n = normalize(i.nrm);
     float3 v = normalize(-i.vpos);
     float3 diff = ambient.rgb;
@@ -51,7 +57,7 @@ float4 PS(PSIn i) : SV_Target {
     }
     // Rim light: edges seen at a grazing angle glow (glass, soap film).
     float rim = flags.w * pow(1 - saturate(abs(dot(n, v))), 3);
-    return float4(base.rgb * diff + spec * specular.rgb + rim * base.rgb * 4, base.a);
+    return float4(Fog(base.rgb * diff + spec * specular.rgb + rim * base.rgb * 4, i.vpos), base.a);
 }
 )";
 
@@ -64,6 +70,8 @@ struct Constants {
     float lightColor[2][4];
     float ambient[4];
     float flags[4];
+    float fog[4];
+    float shift[4];
 };
 
 Texture::~Texture() { SafeRelease(srv); }
@@ -300,6 +308,8 @@ void Renderer::ReleaseTargets() {
     if (ctx) ctx->OMSetRenderTargets(0, nullptr, nullptr);
     SafeRelease(backRtv); SafeRelease(dsv); SafeRelease(depthTex);
     SafeRelease(persistRtv); SafeRelease(persistTex);
+    SafeRelease(lumSrv); SafeRelease(lumTex);
+    for (int i = 0; i < 3; i++) { SafeRelease(lumStaging[i]); lumPending[i] = false; }
 }
 
 void Renderer::Resize(int w, int h) {
@@ -352,6 +362,8 @@ void Renderer::ApplyState(const DrawParams& p) {
     c.flags[1] = p.texture ? 1.0f : 0.0f;
     c.flags[2] = p.vertexColor ? 1.0f : 0.0f;
     c.flags[3] = p.rim;
+    c.fog[0] = p.fogColor[0]; c.fog[1] = p.fogColor[1]; c.fog[2] = p.fogColor[2]; c.fog[3] = p.fogDensity;
+    c.shift[0] = shiftX; c.shift[1] = shiftY; c.shift[2] = shiftScale; c.shift[3] = 0;
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         memcpy(m.pData, &c, sizeof(c));
@@ -488,4 +500,80 @@ Texture* Renderer::CreateTexture(const unsigned* bgra, int w, int h) {
     if (!tex->srv) { delete tex; return nullptr; }
     ctx->GenerateMips(tex->srv);
     return tex;
+}
+
+// ---------------------------------------------------------------------------
+// Pixel orbit and luminance snapshots (OLED burn-in guard, see restkit.h)
+// ---------------------------------------------------------------------------
+void Renderer::SetPixelShift(float dxPixels, float dyPixels, float scale) {
+    shiftX = 2 * dxPixels / width;
+    shiftY = 2 * dyPixels / height;
+    shiftScale = scale;
+}
+
+void Renderer::CreateLumTargets() {
+    int level = 0;
+    while ((width >> level) > 64 || (height >> level) > 64) level++;
+    lumLevel = level;
+    lumW = width >> level; if (lumW < 1) lumW = 1;
+    lumH = height >> level; if (lumH < 1) lumH = 1;
+    D3D11_TEXTURE2D_DESC td = {};
+    td.Width = width;
+    td.Height = height;
+    td.MipLevels = level + 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    if (FAILED(dev->CreateTexture2D(&td, nullptr, &lumTex))) return;
+    dev->CreateShaderResourceView(lumTex, nullptr, &lumSrv);
+    D3D11_TEXTURE2D_DESC sd = {};
+    sd.Width = lumW;
+    sd.Height = lumH;
+    sd.MipLevels = 1;
+    sd.ArraySize = 1;
+    sd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    sd.SampleDesc.Count = 1;
+    sd.Usage = D3D11_USAGE_STAGING;
+    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    for (int i = 0; i < 3; i++) dev->CreateTexture2D(&sd, nullptr, &lumStaging[i]);
+}
+
+void Renderer::RequestLuminance() {
+    if (!lumTex) CreateLumTargets();
+    if (!lumTex || !lumSrv || !lumStaging[lumWrite] || lumPending[lumWrite]) return;
+    // Average the current scene down to a tiny image on the GPU (mip chain)
+    // and queue a copy for the CPU; it is read a frame or two later, so the
+    // GPU never stalls.
+    if (samples > 1) ctx->ResolveSubresource(lumTex, 0, persistTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
+    else             ctx->CopySubresourceRegion(lumTex, 0, 0, 0, 0, persistTex, 0, nullptr);
+    ctx->GenerateMips(lumSrv);
+    ctx->CopySubresourceRegion(lumStaging[lumWrite], 0, 0, 0, 0, lumTex, lumLevel, nullptr);
+    lumPending[lumWrite] = true;
+    lumWrite = (lumWrite + 1) % 3;
+}
+
+bool Renderer::PollLuminance(std::vector<float>& out, int& gw, int& gh) {
+    for (int k = 1; k <= 3; k++) {
+        int i = (lumWrite + k) % 3;   // oldest first
+        if (!lumPending[i]) continue;
+        D3D11_MAPPED_SUBRESOURCE m;
+        HRESULT hr = ctx->Map(lumStaging[i], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return false;
+        if (FAILED(hr)) { lumPending[i] = false; continue; }
+        out.resize((size_t)lumW * lumH);
+        for (int y = 0; y < lumH; y++) {
+            const unsigned char* row = (const unsigned char*)m.pData + (size_t)y * m.RowPitch;
+            for (int x = 0; x < lumW; x++) {
+                const unsigned char* p = row + x * 4;   // B, G, R, A
+                out[(size_t)y * lumW + x] = (0.0722f * p[0] + 0.7152f * p[1] + 0.2126f * p[2]) / 255.0f;
+            }
+        }
+        ctx->Unmap(lumStaging[i], 0);
+        lumPending[i] = false;
+        gw = lumW; gh = lumH;
+        return true;
+    }
+    return false;
 }

@@ -15,7 +15,7 @@ CXXFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type -muni
 LDFLAGS  = -municode -mwindows -static -static-libgcc -static-libstdc++ -s
 LIBS     = -ld3d11 -ldxgi -luuid -lgdiplus -lcomctl32 -lcomdlg32 -lgdi32 -lwinmm -luser32 -ladvapi32
 
-SAVERS   = pipes starfield polyhedra mystify matrix tunnel ribbons bubbles plasma fireworks flowerbox aurora orbs meadow aquarium glasspanes bokeh lorenz wireglobe dnahelix galaxy atom tesseract synthgrid fountain lissajous torusknot plexus fireflies wavegrid gyrorings swarm solarsystem spirograph ripples lightning accretion
+SAVERS   = pipes starfield polyhedra mystify matrix tunnel ribbons bubbles plasma fireworks flowerbox aurora orbs meadow aquarium glasspanes bokeh lorenz wireglobe dnahelix galaxy atom tesseract synthgrid fountain lissajous torusknot plexus fireflies wavegrid gyrorings swarm solarsystem spirograph ripples lightning accretion ocean cloudflight lavalamp northernlights kaleidoscope voronoi flowfield neoncity nebula caustics dunes rainywindow lowpoly inkswirls retrosunset sakura snownight harmony hexpulse wormhole
 OUT      = build
 
 all: $(SAVERS:%=$(OUT)/%.scr)
@@ -33,7 +33,7 @@ $(OUT)/render.o: common/render.cpp common/render.h common/mesh.h | $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 define SAVER_RULES
-$(OUT)/$(1).o: savers/$(1)/$(1).cpp common/saver.h common/render.h common/mesh.h common/scenekit.h common/aerokit.h common/oledkit.h savers/$(1)/resource.h | $(OUT)
+$(OUT)/$(1).o: savers/$(1)/$(1).cpp common/saver.h common/render.h common/mesh.h common/scenekit.h common/aerokit.h common/oledkit.h common/restkit.h savers/$(1)/resource.h | $(OUT)
 	$$(CXX) $$(CXXFLAGS) -c $$< -o $$@
 
 $(OUT)/$(1)_res.o: savers/$(1)/$(1).rc savers/$(1)/resource.h savers/$(1)/$(1).ico common/common.rc common/saver.manifest | $(OUT)
