@@ -58,6 +58,42 @@ Glossy glass, aqua and fresh green, bubbles, bokeh and sunlight: the look of Win
 
 ![](docs/screenshots/aero_portrait.png)
 
+### OLED collection (20 savers)
+
+Made for OLED screens, where a black pixel is fully switched off. Every OLED saver follows the rules in `common/oledkit.h`:
+* **Pure black background.** Typically 91–99% of pixels are completely off, and average brightness is about 1% of full white.
+* **Sparse light.** Thin glowing lines and small points; never large bright areas.
+* **Nothing stands still.** The camera always orbits or drifts, and bright centres (a sun, a nucleus, a galaxy core) wander around the screen, so no element sits on the same pixels (no burn-in).
+* **Brightness slider in every saver** to cap peak brightness (default 70%).
+* **Smooth, time-based fades** (the Matrix technique) and constant-pixel-width anti-aliased lines at any resolution.
+
+| File | Scene |
+|---|---|
+| `OLED_Lorenz.scr` | Tracers drawing the Lorenz "butterfly" attractor |
+| `OLED_WireGlobe.scr` | Rotating wireframe Earth with glowing arcs between cities |
+| `OLED_DNA.scr` | Turning double helix of glowing bases |
+| `OLED_Galaxy.scr` | Thousands of stars wheeling in spiral arms |
+| `OLED_Atom.scr` | Electrons racing round a nucleus with light trails |
+| `OLED_Tesseract.scr` | 4D hypercube rotating through the fourth dimension |
+| `OLED_SynthGrid.scr` | Gliding over endless neon wireframe mountains |
+| `OLED_Fountain.scr` | Fountain of sparks arcing and bouncing |
+| `OLED_Lissajous.scr` | 3D Lissajous knots morphing smoothly into new shapes |
+| `OLED_TorusKnot.scr` | Torus knots cross-fading into new knots |
+| `OLED_Plexus.scr` | Drifting points linking up when close |
+| `OLED_Fireflies.scr` | Fireflies drifting and blinking softly |
+| `OLED_WaveGrid.scr` | Field of dots rippling with interfering waves |
+| `OLED_GyroRings.scr` | Nested gyroscope rings with racing beads |
+| `OLED_Swarm.scr` | Flock of glowing birds with short trails |
+| `OLED_SolarSystem.scr` | Planets and moons around a softly glowing sun |
+| `OLED_Spirograph.scr` | Pen tracing ever-changing 3D spirograph loops |
+| `OLED_Ripples.scr` | Raindrops landing on dark water |
+| `OLED_Lightning.scr` | Branching lightning bolts flashing out of the dark |
+| `OLED_Accretion.scr` | Black hole swallowing a swirling disk of matter |
+
+Settings in each: Colors (Cyan, Magenta, Amber, Green, Ice blue, Rainbow, White), Speed, Brightness, plus one saver-specific slider (tracers, arcs, twist, stars, …).
+
+![](docs/screenshots/oled_all.png)
+
 Portrait screens get their own layout (shown here: Matrix, Tunnel, Bubbles, Flower Box):
 
 ![](docs/screenshots/portrait.png)

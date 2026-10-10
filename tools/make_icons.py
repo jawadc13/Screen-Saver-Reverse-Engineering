@@ -243,10 +243,37 @@ def bokeh(x, y):
     return bg
 
 
+
+OLED_NAMES = ['lorenz', 'wireglobe', 'dnahelix', 'galaxy', 'atom', 'tesseract', 'synthgrid', 'fountain', 'lissajous',
+              'torusknot', 'plexus', 'fireflies', 'wavegrid', 'gyrorings', 'swarm', 'solarsystem', 'spirograph',
+              'ripples', 'lightning', 'accretion']
+
+
+def oled_icon(index):
+    """Pure-black icon with a glowing Lissajous-style curve (unique per saver)."""
+    a, b = 1 + index % 4, 2 + (index * 3) % 5
+    hue = index / 20.0
+    pts = [(15.5 + 12 * math.sin(a * s / 40.0 * 2 * math.pi + index), 15.5 + 12 * math.sin(b * s / 40.0 * 2 * math.pi))
+           for s in range(161)]
+
+    def pixel(x, y):
+        d = min(math.hypot(x - px_, y - py_) for px_, py_ in pts)
+        if d < 0.8:
+            return hsv(hue, 0.35, 1)
+        if d < 2.2:
+            return hsv(hue, 0.8, (2.2 - d) / 1.4)
+        return (0, 0, 0, 255)
+    return pixel
+
+
 for name, fn in (('pipes', pipes), ('starfield', starfield), ('polyhedra', polyhedra),
                  ('mystify', mystify), ('matrix', matrix), ('tunnel', tunnel), ('ribbons', ribbons),
                  ('bubbles', bubbles), ('plasma', plasma), ('fireworks', fireworks), ('flowerbox', flowerbox),
                  ('aurora', aurora), ('orbs', orbs), ('meadow', meadow), ('aquarium', aquarium),
                  ('glasspanes', glasspanes), ('bokeh', bokeh)):
     write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), fn)
+    print('wrote', name)
+
+for i, name in enumerate(OLED_NAMES):
+    write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), oled_icon(i))
     print('wrote', name)
