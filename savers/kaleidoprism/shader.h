@@ -88,13 +88,29 @@ float2 Wedge(float a, float n) {
     return float2(af, min(e, 1.5707963));
 }
 
+// Distance from a point at radius r to the nearest wedge seam, given its
+// angle e to that seam. Where the wedges are narrower than the seam line
+// (many cuts, or near the centre) the distance is stretched so a seam never
+// covers more than about a third of its wedge - otherwise the seams would
+// merge and fill the screen with one flat colour.
+float SeamDist(float e, float r, float n) {
+#if SYM == 0
+    float room = r * sin(min(1.5707963 / n, 1.5707963));
+#else
+    float room = r * sin(min(3.1415927 / n, 1.5707963));
+#endif
+    return r * sin(e) * max(1, uSeam.y / max(0.3 * room, 1e-6));
+}
+
 // Mirrors. Returns the folded point (xy), the distance to the nearest
-// mirror seam (z) and how much the fold magnifies the pattern (w).
+// mirror seam (z) and how much the fold magnifies the pattern (w). In the
+// tile layouts every tile shows the same amount of pattern however small
+// the tiles are, so a tile is never filled by a single flat colour.
 float4 Fold(float2 p, float n) {
     float rings = uGeo.z, r = length(p);
 #if LAYOUT == 0                    // classic wedge
     float2 w = Wedge(Atan2(p.y, p.x) + uGeo.w + uGeo.y * log(r + 0.02), n);
-    return float4(r * cos(w.x), r * sin(w.x), r * sin(w.y), 1);
+    return float4(r * cos(w.x), r * sin(w.x), SeamDist(w.y, r, n), 1);
 #elif LAYOUT == 1                  // three mirrors in a triangle: tiles the plane
     float k = rings * 0.5;
     float2 s = Rot(p, uGeo.w) * k;
@@ -110,12 +126,12 @@ float4 Fold(float2 p, float n) {
     float3 w = b;
     if (col > 1.5) w = b.yzx; else if (col > 0.5) w = b.zxy;
     float2 q = w.y * float2(1, 0) + w.z * float2(0.5, 0.8660254);
-    return float4(q / k, min(w.x, min(w.y, w.z)) * 0.8660254 / k, 1);
+    return float4(q, min(w.x, min(w.y, w.z)) * 0.8660254 / k, k);
 #elif LAYOUT == 2                  // four mirrors in a square
     float k = rings * 0.5;
     float2 s = Rot(p, uGeo.w) * k;
     float2 q = abs(frac(s * 0.5) * 2 - 1);
-    return float4(q / k, min(min(q.x, q.y), min(1 - q.x, 1 - q.y)) / k, 1);
+    return float4(q, min(min(q.x, q.y), min(1 - q.x, 1 - q.y)) / k, k);
 #elif LAYOUT == 3                  // a kaleidoscope in every hexagon
     float k = rings * 0.5;
     float2 s = Rot(p, uGeo.w * 0.25) * k;
@@ -127,17 +143,17 @@ float4 Fold(float2 p, float n) {
     float lr = length(l);
     float2 w = Wedge(Atan2(l.y, l.x) + uGeo.w + uGeo.y * log(lr + 0.02), n);
     float he = 0.5 - max(abs(l.x), dot(abs(l), float2(0.5, 0.8660254)));
-    return float4(lr * cos(w.x) / k, lr * sin(w.x) / k, min(lr * sin(w.y), he) / k, 1);
+    return float4(lr * cos(w.x) * 2, lr * sin(w.x) * 2, min(SeamDist(w.y, lr / k, n), he / k), 2 * k);
 #elif LAYOUT == 4                  // infinite tunnel (log-polar)
     float2 w = Wedge(Atan2(p.y, p.x) + uGeo.w + uGeo.y * log(r + 0.02), n);
     float k = 0.25 + rings * 0.12;
-    return float4((log(max(r, 1e-4)) - uRes.w * 0.12) * k, w.x * k, r * sin(w.y), k / max(r, 0.002));
+    return float4((log(max(r, 1e-4)) - uRes.w * 0.12) * k, w.x * k, SeamDist(w.y, r, n), k / max(r, 0.002));
 #else                              // nested rings turning against each other
     float ri = floor(r * rings);
     float dir = frac(ri * 0.5) * 4 - 1;
     float2 w = Wedge(Atan2(p.y, p.x) + uGeo.w * dir * (1 + 0.25 * ri) + uGeo.y * log(r + 0.02), n);
     float re = (0.5 - abs(frac(r * rings) - 0.5)) / rings;
-    return float4(r * cos(w.x), r * sin(w.x), min(r * sin(w.y), re), 1);
+    return float4(r * cos(w.x), r * sin(w.x), min(SeamDist(w.y, r, n), re), 1);
 #endif
 }
 
@@ -222,8 +238,9 @@ float2 Pattern(float2 u, float w, float t) {
     // Flat bands of colour: the cheapest patterns. Each band sits on its own
     // palette position; only the last pixel before an edge blends.
 #if PATTERN == 9
-    float s = u.y * 2.5 + t * 0.2;
-    float aa = min(0.5, 3.75 * w);
+    // Gently waved, so the bands still cross a thin wedge that lies along them.
+    float s = u.y * 2.5 + 0.9 * sin(u.x * 1.8 + t * 0.3) + t * 0.2;
+    float aa = min(0.5, 4.7 * w);
 #else
     float s = length(u) * 3 - t * 0.3;
     float aa = min(0.5, 4.5 * w);

@@ -124,14 +124,32 @@ static int RollOption(int i) {
     case O_ZOOM:    return Roll(25, 80);
     case O_DETAIL:  return Roll(25, 80);
     case O_VIB:     return Roll(50, 100);
-    case O_BRIGHT:  return Roll(60, 100);
+    case O_BRIGHT:  return Roll(75, 100);
+    case O_SPEED:   return Roll(25, 100);
+    // Rests stay short and well apart, so a random start is never mostly black.
+    case O_EVERY:   return Roll(4, 15);
+    case O_LENGTH:  return Roll(5, 15);
+    case O_BAND:    return Roll(0, 1);
     case O_SEAMW:   return Roll(5, 50);
     case O_FRINGE:  return Roll(0, 60);
     default:        return Roll(kOpts[i].lo, kOpts[i].hi);
     }
 }
 static void Randomize(int* v) { for (int i = 0; i < O_COUNT; i++) if (kOpts[i].random) v[i] = RollOption(i); }
-static void RollTicked(int* v) { for (int i = 0; i < O_COUNT; i++) if (g_rnd[i]) v[i] = RollOption(i); }
+static void RollTicked(int* v) {
+    bool any = false;
+    for (int i = 0; i < O_COUNT; i++) if (g_rnd[i]) { v[i] = RollOption(i); any = true; }
+    if (!any) return;
+    // A rolled look must keep moving: a picture that stands still is dimmed
+    // by the burn-in guard and then rested to black. If rotation, flow and
+    // colour cycling all came out near zero, turn up the ones that were rolled.
+    bool still = abs(v[O_ROT]) < 15 && v[O_FLOW] < 25 && v[O_CYCLE] < 25;
+    if (still) {
+        if (g_rnd[O_FLOW]) v[O_FLOW] = Roll(30, 100);
+        if (g_rnd[O_CYCLE]) v[O_CYCLE] = Roll(30, 100);
+        if (g_rnd[O_ROT]) v[O_ROT] = Roll(0, 1) ? Roll(20, 100) : Roll(-100, -20);
+    }
+}
 
 const wchar_t* RegistryName() { return L"KaleidoPrism"; }
 void LoadSettings() {
@@ -144,6 +162,9 @@ void LoadSettings() {
     }
     memcpy(g_run, g_opt, sizeof(g_run));
     RollTicked(g_run);
+    // Record what this run uses (under ...\KaleidoPrism\LastRun), so a roll
+    // can be looked up afterwards and copied into the settings.
+    for (int i = 0; i < O_COUNT; i++) RegWriteDword(kOpts[i].reg, (DWORD)g_run[i], L"LastRun");
 }
 static void SaveSettings() {
     for (int i = 0; i < O_COUNT; i++) {
@@ -497,6 +518,9 @@ class SaverScene : public RestScene {
         AutoQuality(r, dt, fading);
         ScreenShader* s = Shader(r, level, pattern.a, true);
         if (!s && level > 0) { level = 0; s = Shader(r, 0, pattern.a, true); }
+        // Never show nothing: if this pattern's shader will not compile on
+        // this driver, fall back to the first pattern.
+        if (!s && pattern.a != 0) { pattern.Set(0); s = Shader(r, level, 0, true); }
         if (!s) return;
         // Have the cheaper variant ready before it is needed.
         if (v[O_QUALITY] == 0 && level > 0 && !preview) Shader(r, level - 1, pattern.a, false);
