@@ -1,12 +1,13 @@
 // kaleidoprism.cpp - "Kaleidoscope Prism": a kaleidoscope computed per pixel
-// on the GPU (shader.h), with any number of divisions, six mirror layouts,
-// nine patterns, twelve palettes and a settings dialog built from one table.
+// on the GPU (shader.h), with 1 to 15 cuts, six mirror layouts, thirteen
+// patterns, twelve palettes and a settings dialog built from one table.
 // Full-screen scene made OLED safe by rest::RestScene (burn-in guard,
 // scheduled rests, rolling rest band, pixel orbit) - see common/restkit.h.
 #include "../../common/restkit.h"
 #include "resource.h"
 #include "shader.h"
 #include <commctrl.h>
+#include <map>
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -19,7 +20,7 @@ enum {
     O_COUNT
 };
 enum Kind { COMBO, SLIDER, CHECK };
-enum { PATTERNS = 9, PALETTES = 12 };
+enum { PATTERNS = 13, PALETTES = 12 };
 
 struct Opt {
     Kind kind;
@@ -32,11 +33,11 @@ struct Opt {
 };
 
 static const Opt kOpts[O_COUNT] = {
-    { SLIDER, 0, L"Divisions", L"Divisions", 2, 64, 12, nullptr, true },
+    { SLIDER, 0, L"Cuts (divisions)", L"Cuts", 1, 15, 12, nullptr, true },
     { COMBO,  0, L"Symmetry:", L"Symmetry", 0, 1, 0, L"Mirrored|Pinwheel (no mirror)", true },
     { COMBO,  0, L"Layout:", L"Layout", 0, 5, 0, L"Classic wedges|Triangle mirror box|Square mirror box|Hexagon rosettes|Infinite tunnel|Nested rings", true },
-    { CHECK,  0, L"Morph the number of divisions over time", L"Morph", 0, 1, 0, nullptr, true },
-    { SLIDER, 0, L"Morph between Divisions and", L"MorphTo", 2, 64, 24, nullptr, true },
+    { CHECK,  0, L"Morph the number of cuts over time", L"Morph", 0, 1, 0, nullptr, true },
+    { SLIDER, 0, L"Morph between Cuts and", L"CutsMorphTo", 1, 15, 6, nullptr, true },
     { SLIDER, 0, L"Spiral twist", L"Twist", -100, 100, 0, nullptr, true },
     { SLIDER, 0, L"Rings / tile density", L"Rings", 1, 12, 4, nullptr, true },
     { SLIDER, 0, L"Rotation (negative = anticlockwise)", L"Rotation", -100, 100, 20, nullptr, true },
@@ -44,7 +45,7 @@ static const Opt kOpts[O_COUNT] = {
     { SLIDER, 0, L"Zoom", L"Zoom", 0, 100, 50, nullptr, true },
     { SLIDER, 0, L"Zoom breathing", L"Breath", 0, 100, 20, nullptr, true },
 
-    { COMBO,  1, L"Pattern:", L"Pattern", 0, 9, 0, L"Silk|Stained glass|Gem facets|Petals|Ripples|Marble|Woven arcs|Glass beads|Ribbons|Cycle through all", true },
+    { COMBO,  1, L"Pattern:", L"PatternV2", 0, 13, 0, L"Silk|Stained glass|Gem facets|Petals|Ripples|Marble|Woven arcs|Glass beads|Ribbons|Solid stripes|Solid rings|Solid tiles|Solid triangles|Cycle through all", true },
     { SLIDER, 1, L"Speed", L"Speed", 0, 100, 40, nullptr, false },
     { SLIDER, 1, L"Detail", L"Detail", 0, 100, 50, nullptr, true },
     { SLIDER, 1, L"Liquid warp", L"Warp", 0, 100, 30, nullptr, true },
@@ -79,12 +80,15 @@ static const Preset kPresets[] = {
     { L"Jewel box", 7, { { O_LAYOUT, 1 }, { O_PATTERN, 2 }, { O_PALETTE, 1 }, { O_RINGS, 5 }, { O_SPARK, 70 }, { O_SEAM, 1 }, { O_SEAMW, 15 } } },
     { L"Liquid opal", 6, { { O_PATTERN, 5 }, { O_PALETTE, 6 }, { O_DIV, 6 }, { O_WARP, 60 }, { O_FRINGE, 60 }, { O_BANDS, 65 } } },
     { L"Hex garden", 9, { { O_LAYOUT, 3 }, { O_PATTERN, 3 }, { O_PALETTE, 9 }, { O_DIV, 6 }, { O_RINGS, 3 }, { O_BANDS, 90 }, { O_DETAIL, 75 }, { O_SEAM, 1 }, { O_SEAMW, 8 } } },
-    { L"Hypnotic spiral", 6, { { O_TWIST, 80 }, { O_PATTERN, 8 }, { O_PALETTE, 0 }, { O_DIV, 16 }, { O_ROT, 50 }, { O_CYCLE, 60 } } },
+    { L"Hypnotic spiral", 6, { { O_TWIST, 80 }, { O_PATTERN, 8 }, { O_PALETTE, 0 }, { O_DIV, 15 }, { O_ROT, 50 }, { O_CYCLE, 60 } } },
     { L"Mandala rings", 7, { { O_LAYOUT, 5 }, { O_PATTERN, 3 }, { O_PALETTE, 10 }, { O_DIV, 12 }, { O_RINGS, 5 }, { O_SEAM, 3 }, { O_SEAMW, 20 } } },
     { L"Deep ocean", 6, { { O_PATTERN, 4 }, { O_PALETTE, 4 }, { O_DIV, 10 }, { O_SPEED, 25 }, { O_SPARK, 10 }, { O_GLOW, 55 } } },
     { L"Bead curtain", 5, { { O_LAYOUT, 2 }, { O_PATTERN, 7 }, { O_PALETTE, 3 }, { O_RINGS, 4 }, { O_GLOW, 60 } } },
     { L"Snowflake", 8, { { O_DIV, 6 }, { O_PATTERN, 2 }, { O_PALETTE, 8 }, { O_SEAM, 1 }, { O_SEAMW, 10 }, { O_SPARK, 80 }, { O_ZOOM, 40 }, { O_DETAIL, 65 } } },
-    { L"Everything changes", 5, { { O_PATTERN, 9 }, { O_PALETTE, 12 }, { O_MORPH, 1 }, { O_DIV, 4 }, { O_MORPHTO, 32 } } },
+    { L"Paper cut-outs", 6, { { O_PATTERN, 11 }, { O_PALETTE, 6 }, { O_DIV, 8 }, { O_SPARK, 0 }, { O_FRINGE, 0 }, { O_GLOW, 15 } } },
+    { L"Solid pinwheel", 7, { { O_PATTERN, 9 }, { O_PALETTE, 0 }, { O_DIV, 10 }, { O_TWIST, 45 }, { O_SPARK, 0 }, { O_FRINGE, 0 }, { O_WARP, 0 } } },
+    { L"Solid target", 6, { { O_PATTERN, 10 }, { O_PALETTE, 2 }, { O_DIV, 5 }, { O_SPARK, 0 }, { O_FRINGE, 0 }, { O_WARP, 15 } } },
+    { L"Everything changes", 5, { { O_PATTERN, 13 }, { O_PALETTE, 12 }, { O_MORPH, 1 }, { O_DIV, 3 }, { O_MORPHTO, 15 } } },
 };
 enum { PRESET_COUNT = sizeof(kPresets) / sizeof(kPresets[0]) };
 
@@ -100,8 +104,8 @@ static void Randomize(int* v) {
     // symmetry, and keep the extremes of a few sliders out.
     if (RandI(0, 2) == 0) v[O_LAYOUT] = 0;
     if (RandI(0, 3) != 0) v[O_SYM] = 0;
-    v[O_DIV] = RandI(3, 24);
-    v[O_MORPHTO] = RandI(3, 32);
+    v[O_DIV] = RandI(2, 15);
+    v[O_MORPHTO] = RandI(2, 15);
     v[O_TWIST] = RandI(0, 2) == 0 ? RandI(-70, 70) : 0;
     v[O_ZOOM] = RandI(30, 75);
     v[O_DETAIL] = RandI(30, 75);
@@ -327,17 +331,43 @@ struct Cycler {
     }
 };
 
+// One compiled variant of the shader. Variants needed later (the next
+// pattern in a cycle, a lower quality level) compile on a worker thread, so
+// no frame ever waits for the compiler.
+struct Variant {
+    Renderer* r = nullptr;
+    std::string src;
+    ScreenShader* shader = nullptr;
+    HANDLE thread = nullptr;
+    volatile LONG done = 0;
+    static DWORD WINAPI Run(LPVOID p) {
+        Variant* v = (Variant*)p;
+        v->shader = v->r->CreateScreenShader(v->src.c_str());
+        InterlockedExchange(&v->done, 1);
+        return 0;
+    }
+    void Compile(bool wait) {
+        if (!wait) thread = CreateThread(nullptr, 0, Run, this, 0, nullptr);
+        if (!thread) Run(this);
+    }
+    bool Ready() const { return done != 0; }
+    ~Variant() {
+        if (thread) { WaitForSingleObject(thread, INFINITE); CloseHandle(thread); }
+        delete shader;
+    }
+};
+
 class SaverScene : public RestScene {
     int v[O_COUNT];                 // this monitor's settings (Surprise changes them)
-    ScreenShader* shader[3] = {};   // 1, 2 and 4 samples per pixel, compiled when first used
-    bool tried[3] = {};
-    int level = 2;                  // index into shader[]
+    std::map<int, Variant*> variants;   // key: quality level and pattern
+    int level = 1;                  // 0, 1, 2 = 1, 2, 4 samples per pixel
     float slowTime = 0, frameAvg = 0, settle = 0;
 
     float pt = 0;                   // pattern time (scaled by Speed)
     float rot = 0, chamber = 0, flowX = 0, flowY = 0, flowDir = 0, phase = 0;
     float seed[4] = {};
     Cycler divs, pattern, palette;
+    int nextPattern = 0;
 
     float F(int i) const { return (v[i] - kOpts[i].lo) / (float)(kOpts[i].hi - kOpts[i].lo); }
 
@@ -347,29 +377,39 @@ class SaverScene : public RestScene {
         band = v[O_BAND];
     }
 
-    ~SaverScene() { for (auto* s : shader) delete s; }
+    void ClearVariants() {
+        for (auto& kv : variants) delete kv.second;
+        variants.clear();
+    }
+    ~SaverScene() { ClearVariants(); }
 
     void Setup(Renderer& r) override {
         memcpy(v, g_opt, sizeof(v));
-        int q = v[O_QUALITY];
-        level = q == 0 || q == 3 ? 2 : q - 1;
+        r.UseSingleSample();        // the shader does its own anti-aliasing
     }
 
-    ScreenShader* Shader(Renderer& r) {
-        // Fall back to fewer samples if a variant will not compile.
-        for (int l = level; l >= 0; l--) {
-            if (!tried[l]) {
-                tried[l] = true;
-                std::string src = std::string("#define SAMPLES ") + (l == 2 ? "4" : l == 1 ? "2" : "1") + "\n" + kPrismShader;
-                shader[l] = r.CreateScreenShader(src.c_str());
-            }
-            if (shader[l]) return shader[l];
+    // The variant for a quality level and pattern; everything else in the
+    // key is fixed between rests. Null while it is still compiling.
+    ScreenShader* Shader(Renderer& r, int lvl, int pat, bool wait) {
+        Variant*& var = variants[lvl * 100 + pat];
+        if (!var) {
+            char defs[256];
+            wsprintfA(defs, "#define SAMPLES %d\n#define LAYOUT %d\n#define PATTERN %d\n#define SYM %d\n#define SEAM %d\n"
+                            "#define SPARK %d\n#define FRINGE %d\n#define JEWEL %d\n",
+                      1 << lvl, v[O_LAYOUT], pat, v[O_SYM], v[O_SEAM], v[O_SPARK] > 0, v[O_FRINGE] > 0, Centred() && v[O_JEWEL]);
+            var = new Variant;
+            var->r = &r;
+            var->src = std::string(defs) + kPrismShader;
+            var->Compile(wait);
         }
-        return nullptr;
+        if (wait && !var->Ready()) WaitForSingleObject(var->thread, INFINITE);
+        return var->Ready() ? var->shader : nullptr;
     }
+    bool Centred() const { return v[O_LAYOUT] == 0 || v[O_LAYOUT] == 4 || v[O_LAYOUT] == 5; }
+    int OtherPattern(int cur) const { return (cur + RandI(1, PATTERNS - 1)) % PATTERNS; }
 
     void Reseed() override {
-        if (variation > 0 && v[O_SURPRISE]) Randomize(v);
+        if (variation > 0 && v[O_SURPRISE]) { Randomize(v); ClearVariants(); }
         for (float& s : seed) s = RandF(0, 100);
         pt = RandF(0, 500);
         rot = RandF(0, 2 * kPi); chamber = RandF(0, 2 * kPi); flowDir = RandF(0, 2 * kPi);
@@ -377,26 +417,35 @@ class SaverScene : public RestScene {
         phase = RandF(0, 1);
         divs.Set(v[O_DIV]);
         pattern.Set(v[O_PATTERN] >= PATTERNS ? RandI(0, PATTERNS - 1) : v[O_PATTERN]);
+        nextPattern = OtherPattern(pattern.a);
         palette.Set(v[O_PALETTE] >= PALETTES ? RandI(0, PALETTES - 1) : v[O_PALETTE]);
-        // Automatic quality gets a fresh chance after every rest.
-        if (v[O_QUALITY] == 0) { level = 2; slowTime = 0; settle = 0; }
+        // Automatic starts at 2 samples per pixel and gets a fresh chance
+        // after every rest.
+        int q = v[O_QUALITY];
+        level = q == 0 ? 1 : q - 1;
+        slowTime = 0; settle = 0;
     }
 
     // Automatic quality: when frames take clearly longer than the monitor's
-    // refresh, drop one supersampling level.
-    void AutoQuality(Renderer& r, float dt) {
+    // refresh, drop to one sample per pixel.
+    void AutoQuality(Renderer& r, float dt, bool fading) {
         if (v[O_QUALITY] != 0 || preview || level == 0) return;
         settle += dt;
-        if (settle < 3) { frameAvg = (float)r.RefreshPeriod(); return; }   // ignore start-up and shader compiles
+        if (settle < 3) { frameAvg = (float)r.RefreshPeriod(); return; }   // ignore start-up
+        if (fading) { slowTime = 0; return; }                              // a cross-fade costs double; don't judge by it
         frameAvg += (fminf(dt, 0.25f) - frameAvg) * 0.05f;
-        slowTime = frameAvg > r.RefreshPeriod() * 1.3 ? slowTime + dt : 0;
-        if (slowTime > 1.5f) { level--; slowTime = 0; settle = 0; }
+        slowTime = frameAvg > r.RefreshPeriod() * 1.2 ? slowTime + dt : 0;
+        if (slowTime > 1.0f && Shader(r, level - 1, pattern.a, false)) { level--; slowTime = 0; settle = 0; }
     }
 
     void Draw(Renderer& r, float dt) override {
-        AutoQuality(r, dt);
-        ScreenShader* s = Shader(r);
+        bool fading = pattern.a != pattern.b || divs.a != divs.b;
+        AutoQuality(r, dt, fading);
+        ScreenShader* s = Shader(r, level, pattern.a, true);
+        if (!s && level > 0) { level = 0; s = Shader(r, 0, pattern.a, true); }
         if (!s) return;
+        // Have the cheaper variant ready before it is needed.
+        if (v[O_QUALITY] == 0 && level > 0 && !preview) Shader(r, level - 1, pattern.a, false);
 
         float speed = 0.15f + F(O_SPEED) * 1.85f, sdt = dt * speed;
         pt += sdt;
@@ -408,30 +457,37 @@ class SaverScene : public RestScene {
         phase += sdt * F(O_CYCLE) * 0.25f;
         phase -= floorf(phase);
 
-        if (v[O_MORPH]) {
+        // Only one of cuts and pattern cross-fades at a time (one extra pass).
+        if (v[O_MORPH] && pattern.a == pattern.b) {
             int lo = v[O_DIV] < v[O_MORPHTO] ? v[O_DIV] : v[O_MORPHTO], hi = v[O_DIV] + v[O_MORPHTO] - lo;
             divs.Step(sdt, 14, 5, [&](int cur) { int n = RandI(lo, hi); return n == cur && hi > lo ? (cur < hi ? cur + 1 : cur - 1) : n; });
         }
-        if (v[O_PATTERN] >= PATTERNS) pattern.Step(sdt, 22, 6, [](int cur) { return (cur + RandI(1, PATTERNS - 1)) % PATTERNS; });
+        if (v[O_PATTERN] >= PATTERNS && divs.a == divs.b) {
+            // The next pattern compiles in the background during the hold.
+            bool ready = Shader(r, level, nextPattern, false) != nullptr;
+            if (pattern.a != pattern.b || ready) {
+                int before = pattern.a;
+                pattern.Step(sdt, 22, 6, [&](int) { return nextPattern; });
+                if (pattern.a != before) nextPattern = OtherPattern(pattern.a);
+            }
+        }
         if (v[O_PALETTE] >= PALETTES) palette.Step(sdt, 16, 8, [](int cur) { return (cur + RandI(1, PALETTES - 1)) % PALETTES; });
 
-        int layout = v[O_LAYOUT];
         float minDim = (float)(width < height ? width : height);
         float drift = F(O_DRIFT) * 0.28f;
         float zoom = expf((F(O_ZOOM) - 0.5f) * 2.0f + sinf(pt * 0.23f + seed[1]) * F(O_BREATH) * 0.5f);
         float sw = 0.002f + F(O_SEAMW) * 0.02f;
-        bool centred = layout == 0 || layout == 4 || layout == 5;
 
         float c[60] = {
             (float)width, (float)height, 2.0f / minDim, pt,
-            (float)divs.a, (float)divs.b, divs.mix, (float)v[O_SYM],
-            (float)layout, v[O_TWIST] / 100.0f * 1.5f, (float)v[O_RINGS], rot,
+            (float)divs.a, 0, 0, 0,
+            0, v[O_TWIST] / 100.0f * 1.5f, (float)v[O_RINGS], rot,
             sinf(pt * 0.11f + seed[2]) * drift, cosf(pt * 0.087f + seed[3]) * drift, 1 / zoom, 2.0f * expf((F(O_DETAIL) - 0.5f) * 2.4f),
-            (float)pattern.a, (float)pattern.b, pattern.mix, F(O_WARP) * 0.6f,
+            0, 0, 0, F(O_WARP) * 0.6f,
             flowX, flowY, chamber, F(O_SPARK) * 1.6f,
-            (float)v[O_SEAM], sw / zoom, centred && v[O_JEWEL] ? 1.0f : 0.0f, v[O_VIGNETTE] ? 0.5f : 0.0f,
+            0, sw / zoom, 0, v[O_VIGNETTE] ? 0.5f : 0.0f,
             phase, 0.3f + F(O_BANDS) * 2.2f, 0.6f + F(O_VIB) * 1.0f, v[O_BRIGHT] / 100.0f,
-            F(O_GLOW) * 0.9f, F(O_FRINGE) * 0.07f, 0, 0,
+            F(O_GLOW) * 0.9f, F(O_FRINGE) * 0.07f, 1, 0,
         };
         for (int k = 0; k < 6; k++) {
             unsigned a = kPalettes[palette.a][k], b = kPalettes[palette.b][k];
@@ -441,6 +497,16 @@ class SaverScene : public RestScene {
             }
         }
         r.DrawScreenShader(*s, c, 60);
+        // Cross-fade: the incoming look is drawn over the top, blended in.
+        float mix = pattern.mix > divs.mix ? pattern.mix : divs.mix;
+        if (mix > 0.002f) {
+            ScreenShader* s2 = Shader(r, level, pattern.b, true);
+            if (s2) {
+                c[4] = (float)divs.b;
+                c[34] = mix;
+                r.DrawScreenShader(*s2, c, 60, BLEND_ALPHA);
+            }
+        }
     }
 };
 

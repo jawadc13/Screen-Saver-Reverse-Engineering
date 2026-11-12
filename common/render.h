@@ -129,9 +129,14 @@ public:
     //     float4 PS(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
     // and may declare one cbuffer at register(b0), which DrawScreenShader
     // fills with `params` (at most 64 floats). Returns null if it fails to
-    // compile. The shader draws over the whole scene, opaque.
+    // compile. The shader draws over the whole scene with the given blend
+    // mode. After the first call, CreateScreenShader may be called from
+    // another thread (to compile a variant without stalling a frame).
     ScreenShader* CreateScreenShader(const char* hlsl);
-    void DrawScreenShader(ScreenShader& s, const float* params, int floatCount);
+    void DrawScreenShader(ScreenShader& s, const float* params, int floatCount, BlendMode mode = BLEND_OPAQUE);
+    // For scenes that only draw full-screen shaders: multisampling gives
+    // them nothing, so drop the multisampled scene buffer and its resolve.
+    void UseSingleSample();
 
     // OLED care. Shift (and slightly scale up, so edges stay covered) the
     // whole image by a few pixels; restkit.h orbits it slowly.

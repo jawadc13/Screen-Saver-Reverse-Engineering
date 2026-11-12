@@ -715,7 +715,14 @@ ScreenShader* Renderer::CreateScreenShader(const char* hlsl) {
     return s;
 }
 
-void Renderer::DrawScreenShader(ScreenShader& s, const float* params, int floatCount) {
+void Renderer::UseSingleSample() {
+    if (samples == 1) return;
+    wantedSamples = samples = 1;
+    ReleaseTargets();
+    CreateTargets();
+}
+
+void Renderer::DrawScreenShader(ScreenShader& s, const float* params, int floatCount, BlendMode mode) {
     if (!s.ps || !screenCb) return;
     if (floatCount > 64) floatCount = 64;
     D3D11_MAPPED_SUBRESOURCE m;
@@ -725,7 +732,7 @@ void Renderer::DrawScreenShader(ScreenShader& s, const float* params, int floatC
         ctx->Unmap(screenCb, 0);
     }
     float bf[4] = { 0, 0, 0, 0 };
-    ctx->OMSetBlendState(blend[BLEND_OPAQUE], bf, 0xFFFFFFFF);
+    ctx->OMSetBlendState(blend[mode], bf, 0xFFFFFFFF);
     ctx->OMSetDepthStencilState(depthOff, 0);
     ctx->IASetInputLayout(nullptr);
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
