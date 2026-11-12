@@ -298,3 +298,22 @@ def full_icon(index):
 for i, name in enumerate(FULL_NAMES):
     write_ico(os.path.join(ROOT, 'savers', name, name + '.ico'), full_icon(i))
     print('wrote', name)
+
+
+def kaleidoprism(x, y):
+    # Twelve mirrored wedges of bright colour round a white jewel.
+    cx, cy = x - 15.5, y - 15.5
+    r = math.hypot(cx, cy)
+    if r > 15.5:
+        return (0, 0, 0, 0)
+    a = (math.atan2(cy, cx) / (2 * math.pi)) % 1.0
+    m = (a * 6) % 1.0
+    m = min(m, 1 - m) * 2                      # 0 at a seam, 1 mid-wedge
+    if r < 2.5:
+        return (255, 255, 255, 255)
+    band = math.sin(r * 0.9 - m * 3.0)
+    return hsv(0.08 * r + 0.25 * m, 0.85, 0.55 + 0.45 * band)
+
+
+write_ico(os.path.join(ROOT, 'savers', 'kaleidoprism', 'kaleidoprism.ico'), kaleidoprism)
+print('wrote kaleidoprism')

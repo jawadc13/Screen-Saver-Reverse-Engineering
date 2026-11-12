@@ -263,6 +263,7 @@ Renderer::~Renderer() {
     for (auto*& b : blend) SafeRelease(b);
     SafeRelease(depthOn); SafeRelease(depthOff); SafeRelease(raster); SafeRelease(sampler);
     SafeRelease(postVs); SafeRelease(postPs); SafeRelease(postCb); SafeRelease(postSampler);
+    SafeRelease(screenCb);
     SafeRelease(stream); SafeRelease(cb); SafeRelease(layout); SafeRelease(vs); SafeRelease(ps);
     if (frameWait) CloseHandle(frameWait);
     SafeRelease(swap); SafeRelease(ctx); SafeRelease(dev);
@@ -336,6 +337,7 @@ bool Renderer::Create(HWND hwnd_, HMONITOR monitor, int w, int h) {
     if (!dc) dc = LoadLibraryW(L"d3dcompiler_43.dll");
     if (!dc) return false;
     auto compile = (pD3DCompile)GetProcAddress(dc, "D3DCompile");
+    compileFn = (void*)compile;
     ID3DBlob *vsb = nullptr, *psb = nullptr;
     if (compile) {
         compile(kShader, sizeof(kShader) - 1, "saver", nullptr, nullptr, "VS", "vs_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vsb, nullptr);
@@ -684,6 +686,54 @@ void Renderer::Present() {
     // Sync interval 1: wait for the vertical blank of *this* monitor.
     HRESULT hr = swap->Present(1, 0);
     if (hr == DXGI_STATUS_OCCLUDED) Sleep(50);   // e.g. screen locked / display off
+}
+
+ScreenShader::~ScreenShader() { SafeRelease(ps); }
+
+ScreenShader* Renderer::CreateScreenShader(const char* hlsl) {
+    auto compile = (pD3DCompile)compileFn;
+    if (!compile || !postVs) return nullptr;
+    if (!screenCb) {
+        D3D11_BUFFER_DESC bd = {};
+        bd.ByteWidth = 64 * sizeof(float);
+        bd.Usage = D3D11_USAGE_DYNAMIC;
+        bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        if (FAILED(dev->CreateBuffer(&bd, nullptr, &screenCb))) return nullptr;
+    }
+    ID3DBlob *psb = nullptr, *err = nullptr;
+    compile(hlsl, strlen(hlsl), "screen", nullptr, nullptr, "PS", "ps_4_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &psb, &err);
+    if (err) {
+        if (!psb) OutputDebugStringA((const char*)err->GetBufferPointer());
+        err->Release();
+    }
+    if (!psb) return nullptr;
+    ScreenShader* s = new ScreenShader;
+    dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s->ps);
+    psb->Release();
+    if (!s->ps) { delete s; return nullptr; }
+    return s;
+}
+
+void Renderer::DrawScreenShader(ScreenShader& s, const float* params, int floatCount) {
+    if (!s.ps || !screenCb) return;
+    if (floatCount > 64) floatCount = 64;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (SUCCEEDED(ctx->Map(screenCb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
+        memset(m.pData, 0, 64 * sizeof(float));
+        memcpy(m.pData, params, floatCount * sizeof(float));
+        ctx->Unmap(screenCb, 0);
+    }
+    float bf[4] = { 0, 0, 0, 0 };
+    ctx->OMSetBlendState(blend[BLEND_OPAQUE], bf, 0xFFFFFFFF);
+    ctx->OMSetDepthStencilState(depthOff, 0);
+    ctx->IASetInputLayout(nullptr);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ctx->VSSetShader(postVs, nullptr, 0);
+    ctx->PSSetShader(s.ps, nullptr, 0);
+    ctx->PSSetConstantBuffers(0, 1, &screenCb);
+    ctx->Draw(3, 0);
+    BindScenePipeline();
 }
 
 Texture* Renderer::CreateTexture(const unsigned* bgra, int w, int h) {

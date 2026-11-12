@@ -37,6 +37,12 @@ struct Texture {
     ~Texture();
 };
 
+// A saver's own full-screen pixel shader (Renderer::CreateScreenShader).
+struct ScreenShader {
+    ID3D11PixelShader* ps = nullptr;
+    ~ScreenShader();
+};
+
 // Vertex buffer that lives on the GPU and can grow by appending (Pipes).
 struct GpuMesh {
     ID3D11Buffer* buffer = nullptr;
@@ -118,6 +124,15 @@ public:
 
     Texture* CreateTexture(const unsigned* bgra, int w, int h);
 
+    // Full-screen pixel shaders for scenes that compute every pixel on the
+    // GPU. `hlsl` must define
+    //     float4 PS(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
+    // and may declare one cbuffer at register(b0), which DrawScreenShader
+    // fills with `params` (at most 64 floats). Returns null if it fails to
+    // compile. The shader draws over the whole scene, opaque.
+    ScreenShader* CreateScreenShader(const char* hlsl);
+    void DrawScreenShader(ScreenShader& s, const float* params, int floatCount);
+
     // OLED care. Shift (and slightly scale up, so edges stay covered) the
     // whole image by a few pixels; restkit.h orbits it slowly.
     void SetPost(const PostParams& p) { post = p; }
@@ -169,6 +184,8 @@ private:
     ID3D11VertexShader* postVs = nullptr;
     ID3D11PixelShader* postPs = nullptr;
     ID3D11Buffer* postCb = nullptr;
+    ID3D11Buffer* screenCb = nullptr;
+    void* compileFn = nullptr;
     ID3D11SamplerState* postSampler = nullptr;
     ID3D11Texture2D* postTex = nullptr;
     ID3D11ShaderResourceView* postSrv = nullptr;

@@ -1,0 +1,43 @@
+#include <windows.h>
+#include "resource.h"
+#include "common.rc"
+
+IDI_MAIN ICON "kaleidoprism.ico"
+
+STRINGTABLE
+BEGIN
+    IDS_DESCRIPTION  "Kaleidoscope Prism"
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Kaleidoscope Prism Screen Saver"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "KaleidoscopePrism"
+            VALUE "OriginalFilename", "KaleidoscopePrism.scr"
+            VALUE "ProductName", "Screen Saver Reverse Engineering"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+// Settings dialog: an empty frame; kaleidoprism.cpp creates the controls
+// from its option table.
+400 DIALOGEX 0, 0, 480, 320
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Kaleidoscope Prism Settings"
+FONT 8, "MS Shell Dlg"
+BEGIN
+END
