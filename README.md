@@ -143,15 +143,16 @@ Settings in each: a palette or time-of-day choice, Rolling rest band, Speed, one
 
 | Group | Settings |
 |---|---|
-| Mirrors | **Cuts** (1 to 15 divisions); Mirrored or Pinwheel symmetry; optional morphing between two cut counts over time |
+| Mirrors | **Cuts** (1 to 64 divisions); Mirrored or Pinwheel symmetry; optional morphing between two cut counts over time |
 | Layout | Classic wedges, Triangle mirror box, Square mirror box, Hexagon rosettes, Infinite tunnel, Nested rings; Rings / tile density |
-| Motion | Speed, Rotation (either direction), Spiral twist, Centre drift, Zoom, Zoom breathing, Flow |
+| Motion | Speed (0.15x to 6x), Rotation (either direction), Spiral twist, Centre drift, Zoom, Zoom breathing, Flow |
 | Pattern | Silk, Stained glass, Gem facets, Petals, Ripples, Marble, Woven arcs, Glass beads, Ribbons; four flat-colour patterns (Solid stripes, Solid rings, Solid tiles, Solid triangles); or cycle through all; Detail; Liquid warp |
 | Colour | 12 palettes (Rainbow, Jewel, Neon, Sunset, Ocean, Aurora, Candy, Fire, Ice, Peacock, Royal, Ultraviolet) or cycle through all; Colour cycling, Colour bands, Vibrance, Brightness |
 | Finish | Mirror seams (Invisible, Glowing, Dark lead, Gold wire) and Seam width; Sparkles; Centre jewel; Glow; Prism fringe; Vignette |
-| Screen rest | Rest band, Rest to black every 1 to 15 minutes, Rest length 5 to 60 s; **Surprise me** picks a new random look after each rest |
+| Screen rest | Rest band, Rest to black every 1 to 15 minutes, Rest length 5 to 60 s |
 
 * **15 presets** fill in every setting at once, **Randomize** rolls a new look, and **Defaults** restores the originals. Nothing is saved until OK.
+* **Random on start.** Every setting has a small tickbox to its right. A ticked setting is picked at random each time the screensaver starts, and the rest keep their saved values. **All** and **None** tick or clear every box. *Re-roll ticked settings after each rest* also picks them again after every rest to black. All monitors get the same roll.
 * Cuts apply to the Classic, Hexagon, Tunnel and Nested rings layouts. The triangle and square mirror boxes are fixed by their mirrors.
 * **Quality** sets the samples per pixel: Standard (1), High (2) or Ultra (4). *Automatic* starts at High and drops to Standard if the GPU cannot keep up with the monitor's refresh rate. Pattern edges are also smoothed analytically, and a light dither removes banding from gradients.
 * **Efficiency.** The shader is compiled for exactly the chosen layout, pattern and finish, so the GPU runs only that code. Variants needed later (the next pattern in a cycle, a lower quality level) compile on a background thread, and cross-fades are a second blended pass. The saver also skips the multisampled scene buffer, which a full-screen shader gains nothing from. The solid patterns, with Sparkles and Prism fringe at 0, are the lightest combination.

@@ -1,5 +1,5 @@
 // kaleidoprism.cpp - "Kaleidoscope Prism": a kaleidoscope computed per pixel
-// on the GPU (shader.h), with 1 to 15 cuts, six mirror layouts, thirteen
+// on the GPU (shader.h), with 1 to 64 cuts, six mirror layouts, thirteen
 // patterns, twelve palettes and a settings dialog built from one table.
 // Full-screen scene made OLED safe by rest::RestScene (burn-in guard,
 // scheduled rests, rolling rest band, pixel orbit) - see common/restkit.h.
@@ -29,15 +29,15 @@ struct Opt {
     const wchar_t* reg;       // registry value name
     int lo, hi, def;
     const wchar_t* names;     // combo items separated by '|'
-    bool random;              // touched by Randomize / Surprise
+    bool random;              // touched by the Randomize button and presets
 };
 
 static const Opt kOpts[O_COUNT] = {
-    { SLIDER, 0, L"Cuts (divisions)", L"Cuts", 1, 15, 12, nullptr, true },
+    { SLIDER, 0, L"Cuts (divisions)", L"Cuts", 1, 64, 12, nullptr, true },
     { COMBO,  0, L"Symmetry:", L"Symmetry", 0, 1, 0, L"Mirrored|Pinwheel (no mirror)", true },
     { COMBO,  0, L"Layout:", L"Layout", 0, 5, 0, L"Classic wedges|Triangle mirror box|Square mirror box|Hexagon rosettes|Infinite tunnel|Nested rings", true },
     { CHECK,  0, L"Morph the number of cuts over time", L"Morph", 0, 1, 0, nullptr, true },
-    { SLIDER, 0, L"Morph between Cuts and", L"CutsMorphTo", 1, 15, 6, nullptr, true },
+    { SLIDER, 0, L"Morph between Cuts and", L"CutsMorphTo", 1, 64, 6, nullptr, true },
     { SLIDER, 0, L"Spiral twist", L"Twist", -100, 100, 0, nullptr, true },
     { SLIDER, 0, L"Rings / tile density", L"Rings", 1, 12, 4, nullptr, true },
     { SLIDER, 0, L"Rotation (negative = anticlockwise)", L"Rotation", -100, 100, 20, nullptr, true },
@@ -46,10 +46,10 @@ static const Opt kOpts[O_COUNT] = {
     { SLIDER, 0, L"Zoom breathing", L"Breath", 0, 100, 20, nullptr, true },
 
     { COMBO,  1, L"Pattern:", L"PatternV2", 0, 13, 0, L"Silk|Stained glass|Gem facets|Petals|Ripples|Marble|Woven arcs|Glass beads|Ribbons|Solid stripes|Solid rings|Solid tiles|Solid triangles|Cycle through all", true },
-    { SLIDER, 1, L"Speed", L"Speed", 0, 100, 40, nullptr, false },
+    { SLIDER, 1, L"Speed", L"Speed", 0, 100, 50, nullptr, false },
     { SLIDER, 1, L"Detail", L"Detail", 0, 100, 50, nullptr, true },
     { SLIDER, 1, L"Liquid warp", L"Warp", 0, 100, 30, nullptr, true },
-    { SLIDER, 1, L"Flow (pattern sliding past the mirrors)", L"Flow", 0, 100, 50, nullptr, true },
+    { SLIDER, 1, L"Flow past the mirrors", L"Flow", 0, 100, 50, nullptr, true },
     { COMBO,  1, L"Mirror seams:", L"Seams", 0, 3, 0, L"Invisible|Glowing|Dark lead|Gold wire", true },
     { SLIDER, 1, L"Seam width", L"SeamWidth", 0, 100, 30, nullptr, true },
     { SLIDER, 1, L"Sparkles", L"Sparkles", 0, 100, 30, nullptr, true },
@@ -64,13 +64,27 @@ static const Opt kOpts[O_COUNT] = {
     { SLIDER, 2, L"Glow", L"Glow", 0, 100, 40, nullptr, true },
     { SLIDER, 2, L"Prism fringe", L"Fringe", 0, 100, 20, nullptr, true },
     { CHECK,  2, L"Vignette (darker corners)", L"Vignette", 0, 1, 1, nullptr, true },
-    { CHECK,  2, L"Surprise me: new look after each rest", L"Surprise", 0, 1, 0, nullptr, false },
+    { CHECK,  2, L"Re-roll ticked settings after each rest", L"Surprise", 0, 1, 0, nullptr, false },
     { COMBO,  2, L"Rest band:", L"RestBand", 0, 2, 0, L"Off|Subtle|Strong", false },
     { SLIDER, 2, L"Rest to black every (minutes)", L"RestMinutes", 1, 15, 5, nullptr, false },
     { SLIDER, 2, L"Rest length (seconds)", L"RestSeconds", 5, 60, 15, nullptr, false },
 };
 
-static int g_opt[O_COUNT];
+static int g_opt[O_COUNT];    // saved settings (what the dialog edits)
+static int g_rnd[O_COUNT];    // 1 = pick this setting at random every time the saver starts
+static int g_run[O_COUNT];    // settings for this run: g_opt with the ticked ones rolled
+
+// Own random numbers, seeded from the clock, so every start rolls differently.
+static unsigned g_rng = 0;
+static int Roll(int lo, int hi) {
+    if (!g_rng) {
+        LARGE_INTEGER t; QueryPerformanceCounter(&t);
+        g_rng = (unsigned)t.LowPart ^ (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ 0x9E3779B9u;
+        if (!g_rng) g_rng = 1;
+    }
+    g_rng ^= g_rng << 13; g_rng ^= g_rng >> 17; g_rng ^= g_rng << 5;
+    return lo + (int)(g_rng % (unsigned)(hi - lo + 1));
+}
 
 struct Preset { const wchar_t* name; int n; int kv[12][2]; };
 static const Preset kPresets[] = {
@@ -98,22 +112,26 @@ static void ApplyPreset(int* v, int index) {
     for (int i = 0; i < O_COUNT; i++) if (kOpts[i].random) v[i] = kOpts[i].def;
     for (int k = 0; k < kPresets[index].n; k++) v[kPresets[index].kv[k][0]] = kPresets[index].kv[k][1];
 }
-static void Randomize(int* v) {
-    for (int i = 0; i < O_COUNT; i++) if (kOpts[i].random) v[i] = RandI(kOpts[i].lo, kOpts[i].hi);
-    // Keep the result good-looking: favour the classic layout and mirrored
-    // symmetry, and keep the extremes of a few sliders out.
-    if (RandI(0, 2) == 0) v[O_LAYOUT] = 0;
-    if (RandI(0, 3) != 0) v[O_SYM] = 0;
-    v[O_DIV] = RandI(2, 15);
-    v[O_MORPHTO] = RandI(2, 15);
-    v[O_TWIST] = RandI(0, 2) == 0 ? RandI(-70, 70) : 0;
-    v[O_ZOOM] = RandI(30, 75);
-    v[O_DETAIL] = RandI(30, 75);
-    v[O_VIB] = RandI(55, 100);
-    v[O_SEAMW] = RandI(5, 50);
-    v[O_FRINGE] = RandI(0, 60);
-    v[O_RINGS] = RandI(2, 7);
+// A random value for one setting. Most use their whole range; a few keep
+// out the extremes that rarely look good.
+static int RollOption(int i) {
+    switch (i) {
+    case O_DIV: case O_MORPHTO: return Roll(0, 9) < 6 ? Roll(2, 16) : Roll(2, 64);   // any count, small ones more often
+    case O_LAYOUT:  return Roll(0, 2) == 0 ? 0 : Roll(kOpts[i].lo, kOpts[i].hi);
+    case O_SYM:     return Roll(0, 3) == 0 ? 1 : 0;
+    case O_TWIST:   return Roll(0, 1) ? Roll(-100, 100) : 0;
+    case O_RINGS:   return Roll(2, 8);
+    case O_ZOOM:    return Roll(25, 80);
+    case O_DETAIL:  return Roll(25, 80);
+    case O_VIB:     return Roll(50, 100);
+    case O_BRIGHT:  return Roll(60, 100);
+    case O_SEAMW:   return Roll(5, 50);
+    case O_FRINGE:  return Roll(0, 60);
+    default:        return Roll(kOpts[i].lo, kOpts[i].hi);
+    }
 }
+static void Randomize(int* v) { for (int i = 0; i < O_COUNT; i++) if (kOpts[i].random) v[i] = RollOption(i); }
+static void RollTicked(int* v) { for (int i = 0; i < O_COUNT; i++) if (g_rnd[i]) v[i] = RollOption(i); }
 
 const wchar_t* RegistryName() { return L"KaleidoPrism"; }
 void LoadSettings() {
@@ -122,16 +140,22 @@ void LoadSettings() {
         // Stored as an offset from the lowest value, so negatives fit a DWORD.
         DWORD raw = RegReadDword(o.reg, (DWORD)(o.def - o.lo));
         g_opt[i] = raw > (DWORD)(o.hi - o.lo) ? o.def : (int)raw + o.lo;
+        g_rnd[i] = RegReadDword((std::wstring(o.reg) + L"Random").c_str(), 0) != 0;
     }
+    memcpy(g_run, g_opt, sizeof(g_run));
+    RollTicked(g_run);
 }
 static void SaveSettings() {
-    for (int i = 0; i < O_COUNT; i++) RegWriteDword(kOpts[i].reg, (DWORD)(g_opt[i] - kOpts[i].lo));
+    for (int i = 0; i < O_COUNT; i++) {
+        RegWriteDword(kOpts[i].reg, (DWORD)(g_opt[i] - kOpts[i].lo));
+        RegWriteDword((std::wstring(kOpts[i].reg) + L"Random").c_str(), (DWORD)g_rnd[i]);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Settings dialog. The controls are created from kOpts, three columns.
 // ---------------------------------------------------------------------------
-enum { IDD_PRISM = 400, IDC_LABEL = 2000, IDC_CTRL = 2100, IDC_PRESET = 1900, IDC_RANDOM, IDC_DEFAULTS, IDC_DISPLAY, IDC_STYLE };
+enum { IDD_PRISM = 400, IDC_LABEL = 2000, IDC_CTRL = 2100, IDC_RND = 2200, IDC_PRESET = 1900, IDC_RANDOM, IDC_DEFAULTS, IDC_DISPLAY, IDC_STYLE, IDC_RND_ALL, IDC_RND_NONE };
 
 static HWND Make(HWND dlg, const wchar_t* cls, const wchar_t* text, DWORD style, int id, int x, int y, int w, int h) {
     RECT r = { x, y, x + w, y + h };
@@ -165,6 +189,18 @@ static void SetControls(HWND dlg, const int* v) {
     }
 }
 
+// The small box beside each setting: ticked = random on every start. A
+// ticked setting is greyed, because its own value is not used then.
+static void SetRandomBoxes(HWND dlg, const int* rnd) {
+    for (int i = 0; i < O_COUNT; i++) {
+        SendDlgItemMessageW(dlg, IDC_RND + i, BM_SETCHECK, rnd[i] ? BST_CHECKED : BST_UNCHECKED, 0);
+        EnableWindow(GetDlgItem(dlg, IDC_CTRL + i), !rnd[i]);
+    }
+}
+static void GetRandomBoxes(HWND dlg, int* rnd) {
+    for (int i = 0; i < O_COUNT; i++) rnd[i] = SendDlgItemMessageW(dlg, IDC_RND + i, BM_GETCHECK, 0, 0) == BST_CHECKED;
+}
+
 static void GetControls(HWND dlg, int* v) {
     for (int i = 0; i < O_COUNT; i++) {
         HWND c = GetDlgItem(dlg, IDC_CTRL + i);
@@ -188,7 +224,7 @@ static void AddItems(HWND combo, const wchar_t* names) {
 }
 
 static void BuildDialog(HWND dlg) {
-    const int colW = 156, gap = 6, left = 7, top = 26;
+    const int colW = 156, gap = 6, left = 7, top = 38;
     const wchar_t* titles[3] = { L"Mirrors and motion", L"Pattern", L"Colour, finish and screen rest" };
 
     Make(dlg, L"STATIC", L"&Preset:", 0, -1, left, 9, 28, 8);
@@ -196,7 +232,11 @@ static void BuildDialog(HWND dlg) {
     for (const Preset& p : kPresets) SendMessageW(preset, CB_ADDSTRING, 0, (LPARAM)p.name);
     Make(dlg, L"BUTTON", L"&Randomize", BS_PUSHBUTTON | WS_TABSTOP, IDC_RANDOM, left + 146, 6, 56, 14);
     Make(dlg, L"BUTTON", L"D&efaults", BS_PUSHBUTTON | WS_TABSTOP, IDC_DEFAULTS, left + 206, 6, 50, 14);
-    Make(dlg, L"STATIC", L"Nothing is saved until you press OK.", 0, -1, left + 264, 9, 220, 8);
+    Make(dlg, L"STATIC", L"Random on start:", 0, -1, left + 270, 9, 60, 8);
+    Make(dlg, L"BUTTON", L"&All", BS_PUSHBUTTON | WS_TABSTOP, IDC_RND_ALL, left + 332, 6, 34, 14);
+    Make(dlg, L"BUTTON", L"&None", BS_PUSHBUTTON | WS_TABSTOP, IDC_RND_NONE, left + 370, 6, 34, 14);
+    Make(dlg, L"STATIC", L"Tick the small box to the right of a setting to pick it at random every time the screensaver starts. Nothing is saved until you press OK.",
+         0, -1, left, 25, 470, 8);
 
     int y[3] = { top + 12, top + 12, top + 12 };
     HWND group[3];
@@ -207,16 +247,19 @@ static void BuildDialog(HWND dlg) {
         switch (o.kind) {
         case COMBO:
             Make(dlg, L"STATIC", o.label, 0, IDC_LABEL + i, x, cy + 2, 46, 8);
-            AddItems(Make(dlg, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, IDC_CTRL + i, x + 48, cy, w - 48, 220), o.names);
+            AddItems(Make(dlg, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, IDC_CTRL + i, x + 48, cy, w - 62, 220), o.names);
+            Make(dlg, L"BUTTON", L"", BS_AUTOCHECKBOX | WS_TABSTOP, IDC_RND + i, x + w - 10, cy + 1, 10, 10);
             cy += 17;
             break;
         case CHECK:
-            Make(dlg, L"BUTTON", o.label, BS_AUTOCHECKBOX | WS_TABSTOP, IDC_CTRL + i, x, cy, w, 10);
+            Make(dlg, L"BUTTON", o.label, BS_AUTOCHECKBOX | WS_TABSTOP, IDC_CTRL + i, x, cy, w - 14, 10);
+            Make(dlg, L"BUTTON", L"", BS_AUTOCHECKBOX | WS_TABSTOP, IDC_RND + i, x + w - 10, cy, 10, 10);
             cy += 14;
             break;
         case SLIDER: {
-            Make(dlg, L"STATIC", o.label, 0, IDC_LABEL + i, x, cy, w, 8);
-            HWND tb = Make(dlg, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, IDC_CTRL + i, x - 4, cy + 9, w + 8, 13);
+            Make(dlg, L"STATIC", o.label, 0, IDC_LABEL + i, x, cy, w - 14, 8);
+            HWND tb = Make(dlg, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, IDC_CTRL + i, x - 4, cy + 9, w - 8, 13);
+            Make(dlg, L"BUTTON", L"", BS_AUTOCHECKBOX | WS_TABSTOP, IDC_RND + i, x + w - 10, cy + 10, 10, 10);
             SendMessageW(tb, TBM_SETRANGEMIN, FALSE, o.lo);
             SendMessageW(tb, TBM_SETRANGEMAX, TRUE, o.hi);
             SendMessageW(tb, TBM_SETPAGESIZE, 0, (o.hi - o.lo) / 10 > 0 ? (o.hi - o.lo) / 10 : 1);
@@ -245,6 +288,7 @@ static void BuildDialog(HWND dlg) {
     int w = rc.right - rc.left, h = rc.bottom - rc.top;
     SetWindowPos(dlg, nullptr, (cur.left + cur.right - w) / 2, (cur.top + cur.bottom - h) / 2, w, h, SWP_NOZORDER);
     SetControls(dlg, g_opt);
+    SetRandomBoxes(dlg, g_rnd);
 }
 
 static INT_PTR CALLBACK PrismDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
@@ -258,7 +302,16 @@ static INT_PTR CALLBACK PrismDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         return TRUE; }
     case WM_COMMAND: {
         int v[O_COUNT];
-        switch (LOWORD(wp)) {
+        int id = LOWORD(wp);
+        if (id >= IDC_RND && id < IDC_RND + O_COUNT) {
+            GetRandomBoxes(dlg, v); SetRandomBoxes(dlg, v);
+            return TRUE;
+        }
+        switch (id) {
+        case IDC_RND_ALL: case IDC_RND_NONE:
+            for (int& x : v) x = id == IDC_RND_ALL;
+            SetRandomBoxes(dlg, v);
+            return TRUE;
         case IDC_PRESET:
             if (HIWORD(wp) == CBN_SELCHANGE) {
                 int sel = (int)SendDlgItemMessageW(dlg, IDC_PRESET, CB_GETCURSEL, 0, 0);
@@ -277,6 +330,7 @@ static INT_PTR CALLBACK PrismDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
         case IDC_STYLE:   ShowStyleSettings(dlg); return TRUE;
         case IDOK:
             GetControls(dlg, g_opt);
+            GetRandomBoxes(dlg, g_rnd);
             SaveSettings();
             EndDialog(dlg, IDOK);
             return TRUE;
@@ -358,7 +412,7 @@ struct Variant {
 };
 
 class SaverScene : public RestScene {
-    int v[O_COUNT];                 // this monitor's settings (Surprise changes them)
+    int v[O_COUNT];                 // this monitor's settings (re-rolled after a rest if asked)
     std::map<int, Variant*> variants;   // key: quality level and pattern
     int level = 1;                  // 0, 1, 2 = 1, 2, 4 samples per pixel
     float slowTime = 0, frameAvg = 0, settle = 0;
@@ -384,7 +438,7 @@ class SaverScene : public RestScene {
     ~SaverScene() { ClearVariants(); }
 
     void Setup(Renderer& r) override {
-        memcpy(v, g_opt, sizeof(v));
+        memcpy(v, g_run, sizeof(v));
         r.UseSingleSample();        // the shader does its own anti-aliasing
     }
 
@@ -409,7 +463,7 @@ class SaverScene : public RestScene {
     int OtherPattern(int cur) const { return (cur + RandI(1, PATTERNS - 1)) % PATTERNS; }
 
     void Reseed() override {
-        if (variation > 0 && v[O_SURPRISE]) { Randomize(v); ClearVariants(); }
+        if (variation > 0 && v[O_SURPRISE]) { RollTicked(v); v[O_SURPRISE] = 1; ClearVariants(); }
         for (float& s : seed) s = RandF(0, 100);
         pt = RandF(0, 500);
         rot = RandF(0, 2 * kPi); chamber = RandF(0, 2 * kPi); flowDir = RandF(0, 2 * kPi);
@@ -447,7 +501,9 @@ class SaverScene : public RestScene {
         // Have the cheaper variant ready before it is needed.
         if (v[O_QUALITY] == 0 && level > 0 && !preview) Shader(r, level - 1, pattern.a, false);
 
-        float speed = 0.15f + F(O_SPEED) * 1.85f, sdt = dt * speed;
+        // Speed is exponential: 0.15x at the slow end, about 1x in the middle, 6x at the top.
+        float speed = 0.15f * powf(40.0f, F(O_SPEED)), sdt = dt * speed;
+        float cdt = dt * fminf(speed, 1.5f);   // looks change at a calmer pace than the motion
         pt += sdt;
         rot += sdt * (v[O_ROT] / 100.0f) * 0.5f;
         chamber += sdt * 0.05f;
@@ -460,18 +516,18 @@ class SaverScene : public RestScene {
         // Only one of cuts and pattern cross-fades at a time (one extra pass).
         if (v[O_MORPH] && pattern.a == pattern.b) {
             int lo = v[O_DIV] < v[O_MORPHTO] ? v[O_DIV] : v[O_MORPHTO], hi = v[O_DIV] + v[O_MORPHTO] - lo;
-            divs.Step(sdt, 14, 5, [&](int cur) { int n = RandI(lo, hi); return n == cur && hi > lo ? (cur < hi ? cur + 1 : cur - 1) : n; });
+            divs.Step(cdt, 14, 5, [&](int cur) { int n = RandI(lo, hi); return n == cur && hi > lo ? (cur < hi ? cur + 1 : cur - 1) : n; });
         }
         if (v[O_PATTERN] >= PATTERNS && divs.a == divs.b) {
             // The next pattern compiles in the background during the hold.
             bool ready = Shader(r, level, nextPattern, false) != nullptr;
             if (pattern.a != pattern.b || ready) {
                 int before = pattern.a;
-                pattern.Step(sdt, 22, 6, [&](int) { return nextPattern; });
+                pattern.Step(cdt, 22, 6, [&](int) { return nextPattern; });
                 if (pattern.a != before) nextPattern = OtherPattern(pattern.a);
             }
         }
-        if (v[O_PALETTE] >= PALETTES) palette.Step(sdt, 16, 8, [](int cur) { return (cur + RandI(1, PALETTES - 1)) % PALETTES; });
+        if (v[O_PALETTE] >= PALETTES) palette.Step(cdt, 16, 8, [](int cur) { return (cur + RandI(1, PALETTES - 1)) % PALETTES; });
 
         float minDim = (float)(width < height ? width : height);
         float drift = F(O_DRIFT) * 0.28f;
